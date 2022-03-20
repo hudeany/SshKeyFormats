@@ -6,3 +6,7 @@ Supported SSH key formats:
 - PuTTY key format version 3 (with optional password protection)
 - OpenSSL / PKCS#8 (with optional password protection)
 - PKCS#1
+
+Main classes:
+- de.soderer.sshkeyformats.SshKeyReader
+- de.soderer.sshkeyformats.SshKeyWriter
