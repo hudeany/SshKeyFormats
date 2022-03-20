@@ -43,6 +43,23 @@ import org.bouncycastle.jce.ECNamedCurveTable;
 
 import de.soderer.sshkeyformats.Asn1Codec.DerTag;
 
+/**
+ * Writer for SSH public and private keys with optional password protection<br />
+ * <br />
+ * Supported key formats:<br />
+ * - OpenSSHv1 (proprietary format of OpenSSH, "-----BEGIN OPENSSH PRIVATE KEY-----")<br />
+ * - OpenSSL, PKCS#8 ("-----BEGIN RSA/DSA/EC PRIVATE KEY-----", doesn't support EdDSA)<br />
+ * - PuTTY key version 2 ("PuTTY-User-Key-File-2: ...")<br />
+ * - PuTTY key version 3 ("PuTTY-User-Key-File-3: ...")<br />
+ * - PKCS#1 ("---- BEGIN SSH2 PRIVATE KEY ----", no password encryption)<br />
+ * <br />
+ * Supported cipher algorithms:<br />
+ * - RSA<br />
+ * - DSA<br />
+ * - EC / ECDSA (nistp256, nistp384, nistp521)<br />
+ * - EdDSA (Ed25519, Ed448)<br />
+ * <br />
+ */
 public class SshKeyWriter {
 	/**
 	 * Converts this keypair into protected OpenSSH format<br />
