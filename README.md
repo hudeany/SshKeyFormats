@@ -7,6 +7,12 @@ Supported SSH key formats:
 - OpenSSL / PKCS#8 (with optional password protection)
 - PKCS#1
 
+Supported SSH algorithms:
+- RSA
+- DSA
+- EcDSA (nistp256, nistp384, nistp521)
+- EdDSA (Ed25519, Ed448)
+
 Main classes:
 - de.soderer.sshkeyformats.SshKeyReader
 - de.soderer.sshkeyformats.SshKeyWriter
