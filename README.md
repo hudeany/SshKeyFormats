@@ -1,6 +1,6 @@
-# SshKeyFormats
+# SshKeyFormats (Reader & Writer)
 
-Supported SSH key formats (Reader & Writer):
+Supported SSH key formats:
 - OpenSSH version 1 (with optional password protection)
 - PuTTY key format version 2 (with optional password protection)
 - PuTTY key format version 3 (with optional password protection)
