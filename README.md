@@ -21,7 +21,7 @@ This is basically a JAVA 11 project, but it needs JAVA 15 for support of Ed25519
 
 This project depends on BouncyCastle for following reasons:
 - EcDSA Keyfactory
-- Putty key version 3 Argon3 password deriving hashing algorithm
+- Putty key version 3 "Argon2" password deriving hashing algorithm
 
 Used BouncyCastle libs:
 - bcpkix-jdk15on-1.69.jar
