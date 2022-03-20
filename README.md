@@ -17,7 +17,7 @@ Main classes:
 - de.soderer.sshkeyformats.SshKeyReader
 - de.soderer.sshkeyformats.SshKeyWriter
 
-This is basically a JAVA 11 project, but it needs JAVA 15 for support of Ed25519 and Ed448 cipher algorithm
+This is basically a JAVA 11 project, but it needs JAVA 15 for support of Ed25519 and Ed448 cipher algorithms.
 
 This project depends on BouncyCastle for following reasons:
 - EcDSA Keyfactory
