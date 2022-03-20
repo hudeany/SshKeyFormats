@@ -10,3 +10,10 @@ Supported SSH key formats:
 Main classes:
 - de.soderer.sshkeyformats.SshKeyReader
 - de.soderer.sshkeyformats.SshKeyWriter
+
+This project depends on BouncyCastle for following reasons:
+- EcDSA Keyfactory
+- Putty key version 3 Argon3 password deriving hashing algorithm
+Used BouncyCastle libs:
+- bcpkix-jdk15on-1.69.jar
+- bcprov-jdk15on-1.69.jar
