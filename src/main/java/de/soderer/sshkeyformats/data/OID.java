@@ -1,4 +1,4 @@
-package de.soderer.sshkeyformats;
+package de.soderer.sshkeyformats.data;
 
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;

@@ -2,6 +2,8 @@ package de.soderer.sshkeyformats;
 
 import java.security.KeyPair;
 
+import de.soderer.sshkeyformats.data.KeyPairUtilities;
+
 /**
  * Container for OpenSsh key data
  */

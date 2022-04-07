@@ -41,7 +41,13 @@ import org.bouncycastle.crypto.generators.Argon2BytesGenerator;
 import org.bouncycastle.crypto.params.Argon2Parameters;
 import org.bouncycastle.jce.ECNamedCurveTable;
 
-import de.soderer.sshkeyformats.Asn1Codec.DerTag;
+import de.soderer.sshkeyformats.data.Asn1Codec;
+import de.soderer.sshkeyformats.data.BCryptPBKDF;
+import de.soderer.sshkeyformats.data.CryptographicUtilities;
+import de.soderer.sshkeyformats.data.KeyPairUtilities;
+import de.soderer.sshkeyformats.data.OID;
+import de.soderer.sshkeyformats.data.Password;
+import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 
 /**
  * Writer for SSH public and private keys with optional password protection<br />
@@ -115,8 +121,8 @@ public class SshKeyWriter {
 		keyDataBuffer.writeData(publicKeyData);
 
 		// Private key
-		try (final Password password = passwordChars == null ? null : new Password(passwordChars.clone())) {
-			if (password != null) {
+		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
+			if (password.getPasswordChars() != null) {
 				// Encrypt private key data by bcrypt pbkdf
 				// Putty uses "ISO-8859-1" for password encoding, even for those keys stored in OpenSSHv1 and OpenSSL format
 				// "ssh-keygen" on Linx uses UTF-8 for password encoding
@@ -134,7 +140,7 @@ public class SshKeyWriter {
 
 					privateKeyDataBytesEncrypted = cipher.doFinal(privateKeyData);
 				} finally {
-					Utilities.clear(derivedKeyBytes);
+					clear(derivedKeyBytes);
 				}
 
 				keyDataBuffer.writeData(privateKeyDataBytesEncrypted);
@@ -606,7 +612,7 @@ public class SshKeyWriter {
 	}
 
 	public static void writePuttyVersion2Key(final OutputStream outputStream, final SshKey sshKey, final char[] passwordChars) throws Exception {
-		try (Password password = passwordChars == null ? null : new Password(passwordChars.clone())) {
+		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
 			final String algorithmName = sshKey.getAlgorithm();
 
 			final byte[] publicKeyBytes = KeyPairUtilities.getPublicKeyBytes(sshKey.getKeyPair().getPublic());
@@ -617,7 +623,7 @@ public class SshKeyWriter {
 
 			final String macHash = calculatePuttyMacChecksumVersion2(password, algorithmName, sshKey.getComment(), publicKeyBytes, privateKeyBytes);
 
-			if (password != null) {
+			if (password.getPasswordChars() != null) {
 				final byte[] puttyKeyEncryptionKey = getPuttyPrivateKeyEncryptionKeyVersion2(password.getPasswordBytesIsoEncoded());
 
 				final Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
@@ -631,7 +637,7 @@ public class SshKeyWriter {
 
 			final StringBuilder content = new StringBuilder();
 			content.append("PuTTY-User-Key-File-2: ").append(algorithmName).append("\r\n");
-			content.append("Encryption: ").append(password == null ? "none" : "aes256-cbc").append("\r\n");
+			content.append("Encryption: ").append(password.getPasswordChars() == null ? "none" : "aes256-cbc").append("\r\n");
 			content.append("Comment: ").append(sshKey.getComment()).append("\r\n");
 			content.append("Public-Lines: ").append(getLineCount(publicKeyBase64)).append("\r\n");
 			content.append(publicKeyBase64).append("\r\n");
@@ -672,7 +678,7 @@ public class SshKeyWriter {
 	}
 
 	public static void writePuttyVersion3Key(final OutputStream outputStream, final SshKey sshKey, final char[] passwordChars) throws Exception {
-		try (final Password password = passwordChars == null ? null : new Password(passwordChars.clone())) {
+		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
 			final String algorithmName = sshKey.getAlgorithm();
 
 			final byte[] publicKeyBytes = KeyPairUtilities.getPublicKeyBytes(sshKey.getKeyPair().getPublic());
@@ -685,14 +691,14 @@ public class SshKeyWriter {
 
 			final StringBuilder content = new StringBuilder();
 			content.append("PuTTY-User-Key-File-3: ").append(algorithmName).append("\r\n");
-			content.append("Encryption: ").append(password == null ? "none" : "aes256-cbc").append("\r\n");
+			content.append("Encryption: ").append(password.getPasswordChars() == null ? "none" : "aes256-cbc").append("\r\n");
 			content.append("Comment: ").append(sshKey.getComment()).append("\r\n");
 			content.append("Public-Lines: ").append(getLineCount(publicKeyBase64)).append("\r\n");
 			content.append(publicKeyBase64).append("\r\n");
 
 			final String macHash;
 
-			if (password != null) {
+			if (password.getPasswordChars() != null) {
 				final String keyDerivation = "Argon2id";
 				content.append("Key-Derivation: ").append(keyDerivation).append("\r\n");
 				final int argon2Memory = 8192;
@@ -715,7 +721,7 @@ public class SshKeyWriter {
 
 					privateKeyBytes = cipher.doFinal(privateKeyBytes);
 				} finally {
-					Utilities.clear(puttyKeyEncryptionKey);
+					clear(puttyKeyEncryptionKey);
 				}
 			} else {
 				macHash = calculatePuttyMacChecksumVersion3Argon2(algorithmName, "none", sshKey.getComment(), publicKeyBytes, privateKeyBytes, null);
@@ -795,10 +801,10 @@ public class SshKeyWriter {
 	}
 
 	private static String calculatePuttyMacChecksumVersion2(final Password password, final String keyType, final String comment, final byte[] publicKey, final byte[] privateKey) throws Exception {
-		final String encryptionType = password == null ? "none" : "aes256-cbc";
+		final String encryptionType = password.getPasswordChars() == null ? "none" : "aes256-cbc";
 		final MessageDigest digest = MessageDigest.getInstance("SHA-1");
 		digest.update("putty-private-key-file-mac-key".getBytes(StandardCharsets.UTF_8));
-		if (password != null) {
+		if (password.getPasswordChars() != null) {
 			digest.update(password.getPasswordBytesIsoEncoded());
 		}
 		final byte[] key = digest.digest();
@@ -913,6 +919,12 @@ public class SshKeyWriter {
 				}
 				return lineNumberReader.getLineNumber();
 			}
+		}
+	}
+
+	private static void clear(final byte[] array) {
+		if (array != null) {
+			Arrays.fill(array, (byte) 0);
 		}
 	}
 }

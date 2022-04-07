@@ -51,8 +51,13 @@ import org.bouncycastle.crypto.params.Argon2Parameters;
 import org.bouncycastle.jce.ECNamedCurveTable;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
-import de.soderer.sshkeyformats.Asn1Codec.DerTag;
 import de.soderer.sshkeyformats.SshKey.SshKeyFormat;
+import de.soderer.sshkeyformats.data.Asn1Codec;
+import de.soderer.sshkeyformats.data.BCryptPBKDF;
+import de.soderer.sshkeyformats.data.OID;
+import de.soderer.sshkeyformats.data.Password;
+import de.soderer.sshkeyformats.data.WrongPasswordException;
+import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 
 /**
  * Reader for SSH public and private keys with optional password protection<br />
@@ -109,14 +114,14 @@ public class SshKeyReader {
 	}
 
 	private static SshKey readKey(final BufferedReader dataReader, final char[] passwordChars, final boolean skipPrivateKey) throws Exception {
-		try (final Password password = passwordChars == null ? null : new Password(passwordChars.clone())) {
+		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
 			// Read the stream internally with ISO-8859-1 charset, because PuTTY keys use it and their comments are part of the MAC checksum, which would be wrong otherwise.
 			// OpenSSH keys and OpenSSL keys are more robust in that matters and their comments encoding will be fixed if needed
 			String nextLine;
 
 			// Skip empty lines and comment lines (#), especially for public key files
 			while ((nextLine = dataReader.readLine()) != null) {
-				if (Utilities.isNotBlank(nextLine) && !nextLine.startsWith("#")) {
+				if (isNotBlank(nextLine) && !nextLine.startsWith("#")) {
 					break;
 				}
 			}
@@ -174,7 +179,7 @@ public class SshKeyReader {
 
 									// Skip empty lines and comment lines (#), especially for public key files
 									while ((nextLine = dataReader.readLine()) != null) {
-										if (Utilities.isNotBlank(nextLine) && !nextLine.startsWith("#")) {
+										if (isNotBlank(nextLine) && !nextLine.startsWith("#")) {
 											break;
 										}
 									}
@@ -198,7 +203,7 @@ public class SshKeyReader {
 					} catch (final Exception e) {
 						// Putty uses "ISO-8859-1" for password encoding, even for those keys stored in OpenSSHv1 and OpenSSL format
 						// "ssh-keygen" on Linux uses UTF-8 for password encoding
-						if (password != null && StandardCharsets.UTF_8.equals(passwordCharset)) {
+						if (password.getPasswordChars() != null && StandardCharsets.UTF_8.equals(passwordCharset)) {
 							if (!Arrays.equals(password.getPasswordBytesIsoEncoded(), password.getPasswordBytesUtfEncoded())) {
 								passwordCharset = StandardCharsets.ISO_8859_1;
 							} else {
@@ -224,7 +229,7 @@ public class SshKeyReader {
 						} catch (final Exception e) {
 							// Putty uses "ISO-8859-1" for password encoding, even for those keys stored in OpenSSHv1 and OpenSSL format
 							// "ssh-keygen" on Linux uses UTF-8 for password encoding
-							if (password != null && StandardCharsets.UTF_8.equals(passwordCharset)) {
+							if (password.getPasswordChars() != null && StandardCharsets.UTF_8.equals(passwordCharset)) {
 								if (!Arrays.equals(password.getPasswordBytesIsoEncoded(), password.getPasswordBytesUtfEncoded())) {
 									passwordCharset = StandardCharsets.ISO_8859_1;
 								} else {
@@ -371,7 +376,7 @@ public class SshKeyReader {
 						// Watchout for Comment values correct encoding, because it is part of the MAC checksum
 						keyProperties.put(headerName, nextLine.substring(indexOfHeaderSeparator + 2));
 					}
-				} else if (Utilities.isNotBlank(nextLine)) {
+				} else if (isNotBlank(nextLine)) {
 					throw new Exception("Corrupt key data found: Unexpected line: '" + nextLine + "'");
 				}
 			}
@@ -382,7 +387,7 @@ public class SshKeyReader {
 	}
 
 	private static byte[] decryptOpenSslKeyData(byte[] keyData, final String dekInfo, final Password password, final Charset passwordCharset) throws Exception {
-		if (password == null) {
+		if (password == null || password.getPasswordChars() == null) {
 			throw new WrongPasswordException();
 		} else if (dekInfo == null) {
 			throw new Exception("Missing key encryption info (DEK-Info)");
@@ -460,7 +465,7 @@ public class SshKeyReader {
 			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
 			final boolean xOdd = (mostSignificantByte & 0x80) != 0;
 			edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-			Utilities.reverseArray(edDsaPublicKeyData);
+			reverseArray(edDsaPublicKeyData);
 
 			final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
 			final EdECPoint edECPoint = new EdECPoint(xOdd, y);
@@ -473,7 +478,7 @@ public class SshKeyReader {
 			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
 			final boolean xOdd = (mostSignificantByte & 0x80) != 0;
 			edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-			Utilities.reverseArray(edDsaPublicKeyData);
+			reverseArray(edDsaPublicKeyData);
 
 			final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
 			final EdECPoint edECPoint = new EdECPoint(xOdd, y);
@@ -782,7 +787,7 @@ public class SshKeyReader {
 				} else if (kdfRounds <= 0) {
 					throw new Exception("Invalid key derivation function info 'kdfRounds = " + kdfRounds + "' for key derivation function '" + kdfName + "'");
 				} else {
-					if (password == null) {
+					if (password == null || password.getPasswordChars() == null) {
 						throw new WrongPasswordException();
 					} else {
 						// Decrypt private key by bcrypt pbkdf
@@ -896,7 +901,7 @@ public class SshKeyReader {
 			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
 			final boolean xOdd = (mostSignificantByte & 0x80) != 0;
 			edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-			Utilities.reverseArray(edDsaPublicKeyData);
+			reverseArray(edDsaPublicKeyData);
 
 			final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
 			final EdECPoint edECPoint = new EdECPoint(xOdd, y);
@@ -913,7 +918,7 @@ public class SshKeyReader {
 			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
 			final boolean xOdd = (mostSignificantByte & 0x80) != 0;
 			edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-			Utilities.reverseArray(edDsaPublicKeyData);
+			reverseArray(edDsaPublicKeyData);
 
 			final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
 			final EdECPoint edECPoint = new EdECPoint(xOdd, y);
@@ -1041,7 +1046,7 @@ public class SshKeyReader {
 			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
 			final boolean xOdd = (mostSignificantByte & 0x80) != 0;
 			edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-			Utilities.reverseArray(edDsaPublicKeyData);
+			reverseArray(edDsaPublicKeyData);
 
 			final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
 			final EdECPoint edECPoint = new EdECPoint(xOdd, y);
@@ -1075,7 +1080,7 @@ public class SshKeyReader {
 			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
 			final boolean xOdd = (mostSignificantByte & 0x80) != 0;
 			edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-			Utilities.reverseArray(edDsaPublicKeyData);
+			reverseArray(edDsaPublicKeyData);
 
 			final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
 			final EdECPoint edECPoint = new EdECPoint(xOdd, y);
@@ -1166,7 +1171,7 @@ public class SshKeyReader {
 			if (encryptionMethod == null || "".equals(encryptionMethod) || "none".equalsIgnoreCase(encryptionMethod)) {
 				privateKeyData = base64Decoder.decode(keyProperties.get("Private-Lines"));
 			} else if ("aes256-cbc".equalsIgnoreCase(encryptionMethod)) {
-				if (password == null || password.getPasswordChars().length == 0) {
+				if (password == null || password.getPasswordChars() == null || password.getPasswordChars().length == 0) {
 					throw new WrongPasswordException();
 				} else {
 					passwordByteArray = password.getPasswordBytesIsoEncoded();
@@ -1182,7 +1187,7 @@ public class SshKeyReader {
 				} catch (final Exception e) {
 					throw new Exception("Cannot decrypt PuTTY private key data", e);
 				} finally {
-					Utilities.clear(puttyKeyEncryptionKey);
+					clear(puttyKeyEncryptionKey);
 				}
 			} else {
 				throw new Exception("Unsupported key encryption method: " + encryptionMethod);
@@ -1286,7 +1291,7 @@ public class SshKeyReader {
 			if (encryptionMethod == null || "".equals(encryptionMethod) || "none".equalsIgnoreCase(encryptionMethod)) {
 				privateKeyData = base64Decoder.decode(keyProperties.get("Private-Lines"));
 			} else if ("aes256-cbc".equalsIgnoreCase(encryptionMethod)) {
-				if (password == null || password.getPasswordChars().length == 0) {
+				if (password == null || password.getPasswordChars() == null || password.getPasswordChars().length == 0) {
 					throw new WrongPasswordException();
 				} else {
 					passwordByteArray = password.getPasswordBytesIsoEncoded();
@@ -1324,7 +1329,7 @@ public class SshKeyReader {
 				throw new Exception("Invalid PuTTY key data: " + e.getMessage(), e);
 			}
 		} finally {
-			Utilities.clear(puttyKeyEncryptionKey);
+			clear(puttyKeyEncryptionKey);
 		}
 
 		final KeyPair keyPair = readPuttyKeyData(privateKeyData, publicKeyData);
@@ -1459,7 +1464,7 @@ public class SshKeyReader {
 				final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
 				final boolean xOdd = (mostSignificantByte & 0x80) != 0;
 				edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-				Utilities.reverseArray(edDsaPublicKeyData);
+				reverseArray(edDsaPublicKeyData);
 
 				final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
 				final EdECPoint edECPoint = new EdECPoint(xOdd, y);
@@ -1474,7 +1479,7 @@ public class SshKeyReader {
 				final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
 				final boolean xOdd = (mostSignificantByte & 0x80) != 0;
 				edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-				Utilities.reverseArray(edDsaPublicKeyData);
+				reverseArray(edDsaPublicKeyData);
 
 				final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
 				final EdECPoint edECPoint = new EdECPoint(xOdd, y);
@@ -1535,7 +1540,7 @@ public class SshKeyReader {
 				final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
 				final boolean xOdd = (mostSignificantByte & 0x80) != 0;
 				edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-				Utilities.reverseArray(edDsaPublicKeyData);
+				reverseArray(edDsaPublicKeyData);
 
 				final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
 				final EdECPoint edECPoint = new EdECPoint(xOdd, y);
@@ -1547,7 +1552,7 @@ public class SshKeyReader {
 				final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
 				final boolean xOdd = (mostSignificantByte & 0x80) != 0;
 				edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-				Utilities.reverseArray(edDsaPublicKeyData);
+				reverseArray(edDsaPublicKeyData);
 
 				final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
 				final EdECPoint edECPoint = new EdECPoint(xOdd, y);
@@ -1582,6 +1587,30 @@ public class SshKeyReader {
 			return new String(comment.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
 		} else {
 			return comment;
+		}
+	}
+
+	private static byte[] reverseArray(final byte[] arrayData) {
+		for (int i = 0; i < arrayData.length / 2; i++) {
+			final int j = arrayData.length - 1 - i;
+			final byte tmp = arrayData[i];
+			arrayData[i] = arrayData[j];
+			arrayData[j] = tmp;
+		}
+		return arrayData;
+	}
+
+	private static boolean isBlank(final String value) {
+		return value == null || value.length() == 0 || value.trim().length() == 0;
+	}
+
+	private static boolean isNotBlank(final String value) {
+		return !isBlank(value);
+	}
+
+	private static void clear(final byte[] array) {
+		if (array != null) {
+			Arrays.fill(array, (byte) 0);
 		}
 	}
 }
