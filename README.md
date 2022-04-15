@@ -1,10 +1,10 @@
 # SshKeyFormats (Reader & Writer)
 
 Supported SSH key formats:
-- OpenSSH version 1 (with optional password protection, in ISO-8859-1 (for PuTTY) and UTF-8 (for ssh-kegen))
+- OpenSSH version 1 (with optional password protection, in ISO-8859-1 (for PuTTY) and UTF-8 (for ssh-keygen))
 - PuTTY key format version 2 (with optional password protection)
 - PuTTY key format version 3 (with optional password protection)
-- OpenSSL / PKCS#8 (with optional password protection, in ISO-8859-1 (for PuTTY) and UTF-8 (for ssh-kegen))
+- OpenSSL / PKCS#8 (with optional password protection, in ISO-8859-1 (for PuTTY) and UTF-8 (for ssh-keygen))
 - PKCS#1
 
 Supported SSH algorithms:
