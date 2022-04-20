@@ -53,11 +53,11 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import de.soderer.sshkeyformats.SshKey.SshKeyFormat;
 import de.soderer.sshkeyformats.data.Asn1Codec;
+import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 import de.soderer.sshkeyformats.data.BCryptPBKDF;
 import de.soderer.sshkeyformats.data.OID;
 import de.soderer.sshkeyformats.data.Password;
 import de.soderer.sshkeyformats.data.WrongPasswordException;
-import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 
 /**
  * Reader for SSH public and private keys with optional password protection<br />
@@ -1161,7 +1161,7 @@ public class SshKeyReader {
 			final byte[] publicKeyData = base64Decoder.decode(keyProperties.get("Public-Lines"));
 
 			if (skipPrivateKey) {
-				return new SshKey(SshKeyFormat.Putty2, keyProperties.get("Comment"), new KeyPair(readPuttyPublicKeyData(publicKeyData), null));
+				return new SshKey(SshKeyFormat.Putty2, keyProperties.get("Comment"), readPuttyKeyData(null, publicKeyData));
 			}
 
 			final String encryptionMethod = keyProperties.get("Encryption");
@@ -1279,7 +1279,7 @@ public class SshKeyReader {
 		final byte[] publicKeyData = base64Decoder.decode(keyProperties.get("Public-Lines"));
 
 		if (skipPrivateKey) {
-			return new SshKey(SshKeyFormat.Putty3, keyProperties.get("Comment"), new KeyPair(readPuttyPublicKeyData(publicKeyData), null));
+			return new SshKey(SshKeyFormat.Putty3, keyProperties.get("Comment"), readPuttyKeyData(null, publicKeyData));
 		}
 
 		final String encryptionMethod = keyProperties.get("Encryption");
@@ -1397,24 +1397,30 @@ public class SshKeyReader {
 			final BlockDataReader publicKeyReader = new BlockDataReader(publicKeyData);
 			final String algorithmName = new String(publicKeyReader.readData(), StandardCharsets.UTF_8);
 
-			final BlockDataReader privateKeyReader = new BlockDataReader(privateKeyData);
 
 			if ("ssh-rsa".equalsIgnoreCase(algorithmName)) {
 				final BigInteger publicExponent = publicKeyReader.readBigInt();
 				final BigInteger modulus = publicKeyReader.readBigInt();
 
-				final BigInteger privateExponent = privateKeyReader.readBigInt();
-				final BigInteger p = privateKeyReader.readBigInt(); // secret prime factor (= PrimeP)
-				final BigInteger q = privateKeyReader.readBigInt(); // secret prime factor (= PrimeQ)
-				final BigInteger iqmp = privateKeyReader.readBigInt(); // q^-1 mod p (= CrtCoefficient)
-
-				final BigInteger dmp1 = privateExponent.mod(p.subtract(BigInteger.ONE)); // d mod (p-1) (= PrimeExponentP)
-				final BigInteger dmq1 = privateExponent.mod(q.subtract(BigInteger.ONE)); // d mod (q-1) (= PrimeExponentQ)
-
 				final KeyFactory keyFactory = KeyFactory.getInstance("RSA");
 				final PublicKey publicKey = keyFactory.generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
-				final PrivateKey privateKey = keyFactory.generatePrivate(new RSAPrivateCrtKeySpec(modulus, publicExponent, privateExponent, p, q, dmp1, dmq1, iqmp));
-				return new KeyPair(publicKey, privateKey);
+
+				if (privateKeyData == null) {
+					return new KeyPair(publicKey, null);
+				} else {
+					final BlockDataReader privateKeyReader = new BlockDataReader(privateKeyData);
+
+					final BigInteger privateExponent = privateKeyReader.readBigInt();
+					final BigInteger p = privateKeyReader.readBigInt(); // secret prime factor (= PrimeP)
+					final BigInteger q = privateKeyReader.readBigInt(); // secret prime factor (= PrimeQ)
+					final BigInteger iqmp = privateKeyReader.readBigInt(); // q^-1 mod p (= CrtCoefficient)
+
+					final BigInteger dmp1 = privateExponent.mod(p.subtract(BigInteger.ONE)); // d mod (p-1) (= PrimeExponentP)
+					final BigInteger dmq1 = privateExponent.mod(q.subtract(BigInteger.ONE)); // d mod (q-1) (= PrimeExponentQ)
+
+					final PrivateKey privateKey = keyFactory.generatePrivate(new RSAPrivateCrtKeySpec(modulus, publicExponent, privateExponent, p, q, dmp1, dmq1, iqmp));
+					return new KeyPair(publicKey, privateKey);
+				}
 			} else if ("ssh-dss".equalsIgnoreCase(algorithmName)) {
 				final BigInteger p = publicKeyReader.readBigInt();
 				final BigInteger q = publicKeyReader.readBigInt();
@@ -1423,13 +1429,20 @@ public class SshKeyReader {
 				// Public key exponent
 				final BigInteger y = publicKeyReader.readBigInt();
 
-				// Private key exponent
-				final BigInteger x = privateKeyReader.readBigInt();
-
 				final KeyFactory keyFactory = KeyFactory.getInstance("DSA");
 				final PublicKey publicKey = keyFactory.generatePublic(new DSAPublicKeySpec(y, p, q, g));
-				final PrivateKey privateKey = keyFactory.generatePrivate(new DSAPrivateKeySpec(x, p, q, g));
-				return new KeyPair(publicKey, privateKey);
+
+				if (privateKeyData == null) {
+					return new KeyPair(publicKey, null);
+				} else {
+					final BlockDataReader privateKeyReader = new BlockDataReader(privateKeyData);
+
+					// Private key exponent
+					final BigInteger x = privateKeyReader.readBigInt();
+
+					final PrivateKey privateKey = keyFactory.generatePrivate(new DSAPrivateKeySpec(x, p, q, g));
+					return new KeyPair(publicKey, privateKey);
+				}
 			} else if ("ecdsa-sha2-nistp256".equalsIgnoreCase(algorithmName)
 					|| "ecdsa-sha2-nistp384".equalsIgnoreCase(algorithmName)
 					|| "ecdsa-sha2-nistp521".equalsIgnoreCase(algorithmName)) {
@@ -1448,18 +1461,22 @@ public class SshKeyReader {
 					final org.bouncycastle.jce.spec.ECPublicKeySpec pubSpec = new org.bouncycastle.jce.spec.ECPublicKeySpec(point, ecSpec);
 					final PublicKey publicKey = keyFactory.generatePublic(pubSpec);
 
-					final BigInteger s = privateKeyReader.readBigInt();
+					if (privateKeyData == null) {
+						return new KeyPair(publicKey, null);
+					} else {
+						final BlockDataReader privateKeyReader = new BlockDataReader(privateKeyData);
+						final BigInteger s = privateKeyReader.readBigInt();
 
-					final AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
-					parameters.init(new ECGenParameterSpec(ecdsaCurveName.replace("nist", "sec") + "r1"));
-					final ECParameterSpec ecParameterSpec = parameters.getParameterSpec(ECParameterSpec.class);
-					final PrivateKey privateKey = keyFactory.generatePrivate(new ECPrivateKeySpec(s, ecParameterSpec));
+						final AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
+						parameters.init(new ECGenParameterSpec(ecdsaCurveName.replace("nist", "sec") + "r1"));
+						final ECParameterSpec ecParameterSpec = parameters.getParameterSpec(ECParameterSpec.class);
+						final PrivateKey privateKey = keyFactory.generatePrivate(new ECPrivateKeySpec(s, ecParameterSpec));
 
-					return new KeyPair(publicKey, privateKey);
+						return new KeyPair(publicKey, privateKey);
+					}
 				}
 			} else if ("ssh-ed25519".equalsIgnoreCase(algorithmName)) {
 				final byte[] edDsaPublicKeyData = publicKeyReader.readData();
-				final byte[] privateKeyBytes = privateKeyReader.readData();
 
 				final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
 				final boolean xOdd = (mostSignificantByte & 0x80) != 0;
@@ -1470,11 +1487,17 @@ public class SshKeyReader {
 				final EdECPoint edECPoint = new EdECPoint(xOdd, y);
 
 				final PublicKey publicKey = KeyFactory.getInstance("Ed25519").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed25519"), edECPoint));
-				final PrivateKey privateKey = KeyFactory.getInstance("Ed25519").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed25519"), privateKeyBytes));
-				return new KeyPair(publicKey, privateKey);
+
+				if (privateKeyData == null) {
+					return new KeyPair(publicKey, null);
+				} else {
+					final BlockDataReader privateKeyReader = new BlockDataReader(privateKeyData);
+					final byte[] privateKeyBytes = privateKeyReader.readData();
+					final PrivateKey privateKey = KeyFactory.getInstance("Ed25519").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed25519"), privateKeyBytes));
+					return new KeyPair(publicKey, privateKey);
+				}
 			} else if ("ssh-ed448".equalsIgnoreCase(algorithmName)) {
 				final byte[] edDsaPublicKeyData = publicKeyReader.readData();
-				final byte[] privateKeyBytes = privateKeyReader.readData();
 
 				final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
 				final boolean xOdd = (mostSignificantByte & 0x80) != 0;
@@ -1485,79 +1508,15 @@ public class SshKeyReader {
 				final EdECPoint edECPoint = new EdECPoint(xOdd, y);
 
 				final PublicKey publicKey = KeyFactory.getInstance("Ed448").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed448"), edECPoint));
-				final PrivateKey privateKey = KeyFactory.getInstance("Ed448").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed448"), privateKeyBytes));
-				return new KeyPair(publicKey, privateKey);
-			} else {
-				throw new IllegalArgumentException("Invalid public key algorithm for PuTTY key (only supports RSA / DSA / ECDSA / EdDSA): " + algorithmName);
-			}
-		} catch (final Exception e) {
-			throw new Exception("Cannot read key data", e);
-		}
-	}
 
-	private static PublicKey readPuttyPublicKeyData(final byte[] publicKeyData) throws Exception {
-		try {
-			final BlockDataReader publicKeyReader = new BlockDataReader(publicKeyData);
-			final String algorithmName = new String(publicKeyReader.readData(), StandardCharsets.UTF_8);
-
-			if ("ssh-rsa".equalsIgnoreCase(algorithmName)) {
-				final BigInteger publicExponent = publicKeyReader.readBigInt();
-				final BigInteger modulus = publicKeyReader.readBigInt();
-
-				final KeyFactory keyFactory = KeyFactory.getInstance("RSA");
-				return keyFactory.generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
-			} else if ("ssh-dss".equalsIgnoreCase(algorithmName)) {
-				final BigInteger p = publicKeyReader.readBigInt();
-				final BigInteger q = publicKeyReader.readBigInt();
-				final BigInteger g = publicKeyReader.readBigInt();
-
-				// Public key exponent
-				final BigInteger y = publicKeyReader.readBigInt();
-
-				final KeyFactory keyFactory = KeyFactory.getInstance("DSA");
-				return keyFactory.generatePublic(new DSAPublicKeySpec(y, p, q, g));
-			} else if ("ecdsa-sha2-nistp256".equalsIgnoreCase(algorithmName)
-					|| "ecdsa-sha2-nistp384".equalsIgnoreCase(algorithmName)
-					|| "ecdsa-sha2-nistp521".equalsIgnoreCase(algorithmName)) {
-				final String ecdsaCurveName = new String(publicKeyReader.readData(), StandardCharsets.UTF_8);
-				if (!"nistp256".equals(ecdsaCurveName)
-						&& !"nistp384".equals(ecdsaCurveName)
-						&& !"nistp521".equals(ecdsaCurveName)) {
-					throw new Exception("Unsupported ECDSA curveName: " + ecdsaCurveName);
+				if (privateKeyData == null) {
+					return new KeyPair(publicKey, null);
 				} else {
-					final byte[] eccKeyBlobBytes = publicKeyReader.readData();
-
-					Security.addProvider(new BouncyCastleProvider());
-					final KeyFactory keyFactory = KeyFactory.getInstance("EC", BouncyCastleProvider.PROVIDER_NAME);
-					final org.bouncycastle.jce.spec.ECNamedCurveParameterSpec ecSpec = ECNamedCurveTable.getParameterSpec(ecdsaCurveName.replace("nist", "sec") + "r1");
-					final org.bouncycastle.math.ec.ECPoint point = ecSpec.getCurve().decodePoint(eccKeyBlobBytes);
-					final org.bouncycastle.jce.spec.ECPublicKeySpec pubSpec = new org.bouncycastle.jce.spec.ECPublicKeySpec(point, ecSpec);
-					return keyFactory.generatePublic(pubSpec);
+					final BlockDataReader privateKeyReader = new BlockDataReader(privateKeyData);
+					final byte[] privateKeyBytes = privateKeyReader.readData();
+					final PrivateKey privateKey = KeyFactory.getInstance("Ed448").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed448"), privateKeyBytes));
+					return new KeyPair(publicKey, privateKey);
 				}
-			} else if ("ssh-ed25519".equalsIgnoreCase(algorithmName)) {
-				final byte[] edDsaPublicKeyData = publicKeyReader.readData();
-
-				final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
-				final boolean xOdd = (mostSignificantByte & 0x80) != 0;
-				edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-				reverseArray(edDsaPublicKeyData);
-
-				final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
-				final EdECPoint edECPoint = new EdECPoint(xOdd, y);
-
-				return KeyFactory.getInstance("Ed25519").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed25519"), edECPoint));
-			} else if ("ssh-ed448".equalsIgnoreCase(algorithmName)) {
-				final byte[] edDsaPublicKeyData = publicKeyReader.readData();
-
-				final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
-				final boolean xOdd = (mostSignificantByte & 0x80) != 0;
-				edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-				reverseArray(edDsaPublicKeyData);
-
-				final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
-				final EdECPoint edECPoint = new EdECPoint(xOdd, y);
-
-				return KeyFactory.getInstance("Ed448").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed448"), edECPoint));
 			} else {
 				throw new IllegalArgumentException("Invalid public key algorithm for PuTTY key (only supports RSA / DSA / ECDSA / EdDSA): " + algorithmName);
 			}
