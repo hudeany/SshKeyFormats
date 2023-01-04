@@ -1,4 +1,4 @@
-# SshKeyFormats (Reader & Writer)
+# SshKeyFormats (Reader & Writer and therefore also Converter)
 
 Supported SSH key formats:
 - OpenSSH version 1 (with optional password protection, in ISO-8859-1 (for PuTTY) and UTF-8 (for ssh-keygen))
