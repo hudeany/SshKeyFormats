@@ -35,4 +35,4 @@ Example code for putty key (ppk) generation and conversion to PKCS#8 (pem)
 	SshKey sshKey = new SshKey(SshKeyFormat.Putty2, "TestKey (ÄÖÜäöüß)", keyPair);
 	SshKeyWriter.writePuttyVersion2Key(new FileOutputStream("test.ppk"), sshKey, "password".toCharArray());
 	SshKey readSshKey = SshKeyReader.readKey(new FileInputStream("test.ppk"), "password".toCharArray());
-	SshKeyWriter.writePuttyVersion2Key(new FileOutputStream("test.pem"), readSshKey, "password".toCharArray());
+	SshKeyWriter.writePKCS8Format(new FileOutputStream("test.pem"), readSshKey, "password".toCharArray());
