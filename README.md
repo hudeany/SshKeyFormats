@@ -1,4 +1,4 @@
-# SshKeyFormats (Reader & Writer)
+# SshKeyFormats (Reader & Writer and therefore also Converter)
 
 Supported SSH key formats:
 - OpenSSH version 1 (with optional password protection, in ISO-8859-1 (for PuTTY) and UTF-8 (for ssh-keygen))
@@ -26,3 +26,13 @@ This project depends on BouncyCastle for following reasons:
 Used BouncyCastle libs:
 - bcpkix-jdk15on-1.69.jar
 - bcprov-jdk15on-1.69.jar
+
+Example code for putty key (ppk) generation and conversion to PKCS#8 (pem)
+
+	java.security.KeyPairGenerator keyPairGenerator = java.security.KeyPairGenerator.getInstance("RSA");
+	keyPairGenerator.initialize(4096);
+	java.security.KeyPair keyPair = keyPairGenerator.generateKeyPair();
+	SshKey sshKey = new SshKey(SshKeyFormat.Putty2, "TestKey", keyPair);
+	SshKeyWriter.writePuttyVersion2Key(new FileOutputStream("test.ppk"), sshKey, "password".toCharArray());
+	SshKey readSshKey = SshKeyReader.readKey(new FileInputStream("test.ppk"), "password".toCharArray());
+	SshKeyWriter.writePKCS8Format(new FileOutputStream("test.pem"), readSshKey, "password".toCharArray());
