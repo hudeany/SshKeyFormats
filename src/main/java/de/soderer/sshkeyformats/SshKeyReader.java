@@ -53,11 +53,11 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import de.soderer.sshkeyformats.SshKey.SshKeyFormat;
 import de.soderer.sshkeyformats.data.Asn1Codec;
-import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 import de.soderer.sshkeyformats.data.BCryptPBKDF;
 import de.soderer.sshkeyformats.data.OID;
 import de.soderer.sshkeyformats.data.Password;
 import de.soderer.sshkeyformats.data.WrongPasswordException;
+import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 
 /**
  * Reader for SSH public and private keys with optional password protection<br />
@@ -1559,17 +1559,17 @@ public class SshKeyReader {
 		return arrayData;
 	}
 
+	private static void clear(final byte[] array) {
+		if (array != null) {
+			Arrays.fill(array, (byte) 0);
+		}
+	}
+
 	private static boolean isBlank(final String value) {
 		return value == null || value.length() == 0 || value.trim().length() == 0;
 	}
 
 	private static boolean isNotBlank(final String value) {
 		return !isBlank(value);
-	}
-
-	private static void clear(final byte[] array) {
-		if (array != null) {
-			Arrays.fill(array, (byte) 0);
-		}
 	}
 }

@@ -16,7 +16,7 @@ public class SshKey {
 		Putty3("PuTTY Version 3"),
 		PKCS1("PKCS#1");
 
-		private String displayText;
+		private final String displayText;
 
 		public String getDisplayText() {
 			return displayText;
@@ -112,7 +112,7 @@ public class SshKey {
 		return KeyPairUtilities.getSha512FingerprintBase64(keyPair);
 	}
 
-	public KeyPair getKeyPair() throws Exception {
+	public KeyPair getKeyPair() {
 		return keyPair;
 	}
 

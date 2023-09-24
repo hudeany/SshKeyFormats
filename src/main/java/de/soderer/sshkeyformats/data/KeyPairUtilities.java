@@ -6,10 +6,13 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.security.AlgorithmParameters;
 import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.SecureRandom;
 import java.security.interfaces.DSAPrivateKey;
 import java.security.interfaces.DSAPublicKey;
 import java.security.interfaces.ECPrivateKey;
@@ -18,6 +21,8 @@ import java.security.interfaces.EdECPrivateKey;
 import java.security.interfaces.EdECPublicKey;
 import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.interfaces.RSAPublicKey;
+import java.security.spec.ECGenParameterSpec;
+import java.security.spec.ECParameterSpec;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -25,6 +30,80 @@ import java.util.List;
 import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 
 public class KeyPairUtilities {
+	/**
+	 * Create a RSA keypair of given strength
+	 */
+	public static KeyPair createRsaKeyPair(final int keyStrength) throws Exception {
+		if (keyStrength < 512) {
+			throw new Exception("Invalid RSA key strength: " + keyStrength);
+		}
+		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
+		keyPairGenerator.initialize(keyStrength);
+		return keyPairGenerator.generateKeyPair();
+	}
+
+	/**
+	 * Create a DSA keypair of 1024 bit strength<br/>
+	 * Watchout: OpenSSH only supports 1024 bit DSA key strength<br/>
+	 */
+	public static KeyPair createDsaKeyPair() throws Exception {
+		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("DSA");
+		keyPairGenerator.initialize(1024);
+		return keyPairGenerator.generateKeyPair();
+	}
+
+	/**
+	 * Create a DSA keypair of given strength<br/>
+	 * Watchout: OpenSSH only supports 1024 bit DSA key strength<br/>
+	 */
+	public static KeyPair createDsaKeyPair(final int keyStrength) throws Exception {
+		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("DSA");
+		keyPairGenerator.initialize(keyStrength);
+		return keyPairGenerator.generateKeyPair();
+	}
+
+	/**
+	 * Create a ECDSA keypair of eliptic curve name.
+	 * Supported eliptic curve names are
+	 *   nistp256 or secp256
+	 *   nistp384 or secp384
+	 *   nistp521 or secp521
+	 */
+	public static KeyPair createEllipticCurveKeyPair(final String ecdsaCurveName) throws Exception {
+		if (ecdsaCurveName == null || "".equals(ecdsaCurveName.trim())) {
+			throw new Exception("Missing ECDSA curve name parameter");
+		}
+		final String curveName = ecdsaCurveName.toLowerCase().trim().replace("nist", "sec");
+		if (!"secp256".equals(curveName) && !"secp384".equals(curveName) && !"secp521".equals(curveName)) {
+			throw new Exception("Unknown ECDSA curve name: " + ecdsaCurveName);
+		}
+		final AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
+		parameters.init(new ECGenParameterSpec(curveName + "r1"));
+		final ECParameterSpec ecParameterSpec = parameters.getParameterSpec(ECParameterSpec.class);
+		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("EC");
+		keyPairGenerator.initialize(ecParameterSpec, new SecureRandom());
+		return keyPairGenerator.generateKeyPair();
+	}
+
+	public static KeyPair createEllipticCurveKeyPair(final int curveId) throws Exception {
+		if (256 != curveId && 384 != curveId && 521 != curveId) {
+			throw new Exception("Invalid ECDSA curve id parameter");
+		}
+		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("EC");
+		keyPairGenerator.initialize(curveId);
+		return keyPairGenerator.generateKeyPair();
+	}
+
+	public static KeyPair createEd25519CurveKeyPair() throws Exception {
+		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("Ed25519");
+		return keyPairGenerator.generateKeyPair();
+	}
+
+	public static KeyPair createEd448CurveKeyPair() throws Exception {
+		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("Ed448");
+		return keyPairGenerator.generateKeyPair();
+	}
+
 	/**
 	 * Key type<br />
 	 * "ssh-rsa" for RSA key<br />
@@ -96,7 +175,7 @@ public class KeyPairUtilities {
 			} else {
 				throw new Exception("Unknown EdDSA type: " + privateKeyEdEC.getParams().getName());
 			}
-		} else{
+		} else {
 			throw new IllegalArgumentException("Unknown private key cipher");
 		}
 	}
@@ -202,7 +281,7 @@ public class KeyPairUtilities {
 				System.arraycopy(javaEncoding, javaEncoding.length - publicKeyDataLength, publicKeyData, 0, publicKeyDataLength);
 				publicKeyWriter.writeData(publicKeyData);
 			} else {
-				throw new Exception("Unsupported  algorithm name: " + algorithmName);
+				throw new Exception("Unsupported algorithm name: " + algorithmName);
 			}
 			return publicKeyWriter.toByteArray();
 		}
@@ -223,7 +302,7 @@ public class KeyPairUtilities {
 			try {
 				final MessageDigest md = MessageDigest.getInstance("MD5");
 				md.update(getPublicKeyBytes(publicKey));
-				return toHexString(md.digest(), ":");
+				return BitUtilities.toHexString(md.digest(), ":").toUpperCase();
 			} catch (final Exception e) {
 				throw new Exception("Cannot create MD5 fingerprint", e);
 			}
@@ -245,7 +324,7 @@ public class KeyPairUtilities {
 			try {
 				final MessageDigest md = MessageDigest.getInstance("SHA-1");
 				md.update(getPublicKeyBytes(publicKey));
-				return toHexString(md.digest(), ":");
+				return BitUtilities.toHexString(md.digest(), ":");
 			} catch (final Exception e) {
 				throw new Exception("Cannot create SHA1 fingerprint", e);
 			}
@@ -289,7 +368,7 @@ public class KeyPairUtilities {
 			try {
 				final MessageDigest md = MessageDigest.getInstance("SHA-256");
 				md.update(getPublicKeyBytes(publicKey));
-				return toHexString(md.digest(), ":");
+				return BitUtilities.toHexString(md.digest(), ":");
 			} catch (final Exception e) {
 				throw new Exception("Cannot create SHA256 fingerprint", e);
 			}
@@ -333,7 +412,7 @@ public class KeyPairUtilities {
 			try {
 				final MessageDigest md = MessageDigest.getInstance("SHA-384");
 				md.update(getPublicKeyBytes(publicKey));
-				return toHexString(md.digest(), ":");
+				return BitUtilities.toHexString(md.digest(), ":");
 			} catch (final Exception e) {
 				throw new Exception("Cannot create SHA384 fingerprint", e);
 			}
@@ -377,7 +456,7 @@ public class KeyPairUtilities {
 			try {
 				final MessageDigest md = MessageDigest.getInstance("SHA-512");
 				md.update(getPublicKeyBytes(publicKey));
-				return toHexString(md.digest(), ":");
+				return BitUtilities.toHexString(md.digest(), ":");
 			} catch (final Exception e) {
 				throw new Exception("Cannot create SHA512 fingerprint", e);
 			}
@@ -457,19 +536,5 @@ public class KeyPairUtilities {
 		private byte[] toByteArray() {
 			return outputStream.toByteArray();
 		}
-	}
-
-	/**
-	 * Uppercase hexadezimal display of ByteArray data with optional separator after each byte
-	 */
-	public static String toHexString(final byte[] data, final String separator) {
-		final StringBuilder returnString = new StringBuilder();
-		for (final byte dataByte : data) {
-			if (returnString.length() > 0 && separator != null) {
-				returnString.append(separator);
-			}
-			returnString.append(String.format("%02X", dataByte));
-		}
-		return returnString.toString().toLowerCase();
 	}
 }

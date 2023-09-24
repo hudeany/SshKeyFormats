@@ -36,3 +36,20 @@ Example code for putty key (ppk) generation and conversion to PKCS#8 (pem)
 	SshKeyWriter.writePuttyVersion2Key(new FileOutputStream("test.ppk"), sshKey, "password".toCharArray());
 	SshKey readSshKey = SshKeyReader.readKey(new FileInputStream("test.ppk"), "password".toCharArray());
 	SshKeyWriter.writePKCS8Format(new FileOutputStream("test.pem"), readSshKey, "password".toCharArray());
+
+## Maven2 repository
+This library is also available via Maven2 repository
+ 
+	<repositories>
+		<repository>
+			<id>de.soderer</id>
+			<url>http://soderer.de/maven2</url>
+		</repository>
+	</repositories>
+
+	<dependency>
+		<groupId>de.soderer</groupId>
+		<artifactId>sshkeyformats</artifactId>
+		<version>RELEASE</version>
+	</dependency>
+	

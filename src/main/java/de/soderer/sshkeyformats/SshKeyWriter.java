@@ -649,7 +649,7 @@ public class SshKeyWriter {
 		}
 	}
 
-	public static byte[] getPuttyVersion2PrivateKeyBytes(final PrivateKey privateKey) throws Exception {
+	private static byte[] getPuttyVersion2PrivateKeyBytes(final PrivateKey privateKey) throws Exception {
 		if (privateKey == null) {
 			throw new Exception("Invalid empty privateKey parameter");
 		} else {
@@ -737,7 +737,7 @@ public class SshKeyWriter {
 		}
 	}
 
-	public static byte[] getPuttyVersion3PrivateKeyBytes(final PrivateKey privateKey) throws Exception {
+	private static byte[] getPuttyVersion3PrivateKeyBytes(final PrivateKey privateKey) throws Exception {
 		if (privateKey == null) {
 			throw new Exception("Invalid empty privateKey parameter");
 		} else {
