@@ -33,6 +33,17 @@
 	
 		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk15on/1.70/bcprov-jdk15on-1.70.jar" dest="lib/" />
 		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcpkix-jdk15on/1.70/bcpkix-jdk15on-1.70.jar" dest="lib/" />
+		
+		<mkdir dir="lib_test/" />
+		<delete includeEmptyDirs="true">
+			<fileset dir="lib_test/">
+				<include name="*" />
+			</fileset>
+		</delete>
+		
+		<get src="https://repo1.maven.org/maven2/org/hamcrest/hamcrest/2.2/hamcrest-2.2.jar" dest="lib_test/" />
+		<get src="https://repo1.maven.org/maven2/org/hamcrest/hamcrest-core/2.2/hamcrest-core-2.2.jar" dest="lib_test/" />
+		<get src="https://repo1.maven.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar" dest="lib_test/" />
 	</target>
 
 	<target name="create_jar" depends="cleanup_before, download_dependencies">
