@@ -53,11 +53,11 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import de.soderer.sshkeyformats.SshKey.SshKeyFormat;
 import de.soderer.sshkeyformats.data.Asn1Codec;
+import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 import de.soderer.sshkeyformats.data.BCryptPBKDF;
 import de.soderer.sshkeyformats.data.OID;
 import de.soderer.sshkeyformats.data.Password;
 import de.soderer.sshkeyformats.data.WrongPasswordException;
-import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 
 /**
  * Reader for SSH public and private keys with optional password protection<br />
@@ -1140,9 +1140,13 @@ public class SshKeyReader {
 
 	private static byte[] removeLengthCodedPadding(final byte[] data) {
 		final int paddingSize = data[data.length - 1];
-		final byte[] dataUnpadded = new byte[data.length - paddingSize];
-		System.arraycopy(data, 0, dataUnpadded, 0, dataUnpadded.length);
-		return dataUnpadded;
+		if (paddingSize > 0) {
+			final byte[] dataUnpadded = new byte[data.length - paddingSize];
+			System.arraycopy(data, 0, dataUnpadded, 0, dataUnpadded.length);
+			return dataUnpadded;
+		} else {
+			return data;
+		}
 	}
 
 	private static SshKey readPuttyVersion2Key(final Map<String, String> keyProperties, final Password password, final boolean skipPrivateKey) throws Exception {
