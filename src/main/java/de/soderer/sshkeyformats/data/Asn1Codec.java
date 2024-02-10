@@ -139,10 +139,23 @@ public class Asn1Codec {
 				}
 			}
 
-			final byte[] dataBlock = new byte[tagLength];
-			input.read(dataBlock);
+			// This tagLength might be invalid encoded, because of invalid decryption.
+			// So to prevent out of memory exception, read from input up to tagLength and stop if input hits EOF.
+			final ByteArrayOutputStream tagData = new ByteArrayOutputStream();
+			final byte[] buffer = new byte[8192];
+			int bytesRead = 0;
+			int tagLengthLeftToRead = tagLength;
+			while ((bytesRead = input.read(buffer, 0, tagLengthLeftToRead)) > 0) {
+				tagData.write(buffer, 0, bytesRead);
+				tagLengthLeftToRead = tagLengthLeftToRead - bytesRead;
+			}
+			final byte[] blockData = tagData.toByteArray();
 
-			return new DerTag(tagId, dataBlock);
+			if (blockData.length != tagLength) {
+				throw new Exception("Block length read error. Blocksize: " + data.length + " Tagsize: " + tagLength);
+			} else {
+				return new DerTag(tagId, tagData.toByteArray());
+			}
 		} catch (final IOException e) {
 			throw new Exception("Block read error", e);
 		}
