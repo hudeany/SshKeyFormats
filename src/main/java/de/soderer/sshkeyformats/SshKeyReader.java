@@ -265,8 +265,13 @@ public class SshKeyReader {
 					|| nextLine.startsWith("ssh-ed448 ")) {
 				final String[] keyParts = nextLine.split(" ", 3);
 				final byte[] keyData = Base64.getDecoder().decode(keyParts[1]);
-				String keyComment = keyParts[2];
-				keyComment = fixCommentEncodingIfNeeded(keyComment);
+				String keyComment;
+				if (keyParts.length > 2) {
+					keyComment = keyParts[2];
+					keyComment = fixCommentEncodingIfNeeded(keyComment);
+				} else {
+					keyComment = null;
+				}
 				return new SshKey(SshKeyFormat.OpenSSL, keyComment, new KeyPair(parsePublicKeyBytes(keyData), null));
 			} else {
 				throw new Exception("No keydata found");
