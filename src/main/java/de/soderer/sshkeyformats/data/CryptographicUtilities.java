@@ -768,19 +768,20 @@ public class CryptographicUtilities {
 		try {
 			Security.addProvider(new BouncyCastleProvider());
 
-			final PEMParser pemParser = new PEMParser(new StringReader(keyDataString));
-			Object object;
-			while ((object = pemParser.readObject()) != null) {
-				if (object instanceof PEMKeyPair) {
-					final JcaPEMKeyConverter converter = new JcaPEMKeyConverter().setProvider(BouncyCastleProvider.PROVIDER_NAME);
-					final KeyPair keyPair = converter.getKeyPair((PEMKeyPair) object);
-					return keyPair.getPublic();
-				} else if (object instanceof SubjectPublicKeyInfo) {
-					final JcaPEMKeyConverter converter = new JcaPEMKeyConverter();
-					return converter.getPublicKey((SubjectPublicKeyInfo) object);
+			try (final PEMParser pemParser = new PEMParser(new StringReader(keyDataString))) {
+				Object object;
+				while ((object = pemParser.readObject()) != null) {
+					if (object instanceof PEMKeyPair) {
+						final JcaPEMKeyConverter converter = new JcaPEMKeyConverter().setProvider(BouncyCastleProvider.PROVIDER_NAME);
+						final KeyPair keyPair = converter.getKeyPair((PEMKeyPair) object);
+						return keyPair.getPublic();
+					} else if (object instanceof SubjectPublicKeyInfo) {
+						final JcaPEMKeyConverter converter = new JcaPEMKeyConverter();
+						return converter.getPublicKey((SubjectPublicKeyInfo) object);
+					}
 				}
+				throw new Exception("No public key object found in data");
 			}
-			throw new Exception("No public key object found in data");
 		} catch (final Exception e) {
 			throw new Exception("Cannot read public key: " + e.getMessage(), e);
 		}
@@ -962,8 +963,7 @@ public class CryptographicUtilities {
 		Security.addProvider(new BouncyCastleProvider());
 
 		PKCS10CertificationRequest certificationRequest;
-		try {
-			final PEMParser pemParser = new PEMParser(new StringReader(encodedCertificationRequest));
+		try (final PEMParser pemParser = new PEMParser(new StringReader(encodedCertificationRequest))) {
 			certificationRequest = (PKCS10CertificationRequest) pemParser.readObject();
 		} catch (final IOException e) {
 			throw new Exception("Error in reading the certificate signing request: " + e.getMessage(), e);
