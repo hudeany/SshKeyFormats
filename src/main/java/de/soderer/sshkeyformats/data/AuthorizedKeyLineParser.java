@@ -14,7 +14,7 @@ public class AuthorizedKeyLineParser {
 
 	public AuthorizedKey parseAuthorizedKeyLine(final String authorizedKeyLine) throws Exception {
 		try {
-			currentLineTextArray = authorizedKeyLine.toCharArray();
+			currentLineTextArray = authorizedKeyLine.trim().toCharArray();
 			currentLineReadIndex = 0;
 
 			@SuppressWarnings("unused")
@@ -62,6 +62,11 @@ public class AuthorizedKeyLineParser {
 	}
 
 	private String getNextStringBlock() throws Exception {
+		// Skip whitespace characters
+		while (currentLineReadIndex < currentLineTextArray.length && Character.isWhitespace(currentLineTextArray[currentLineReadIndex])) {
+			currentLineReadIndex++;
+		}
+
 		if (currentLineTextArray.length <= currentLineReadIndex) {
 			return "";
 		} else {
