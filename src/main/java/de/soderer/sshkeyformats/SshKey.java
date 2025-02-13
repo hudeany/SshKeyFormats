@@ -29,7 +29,7 @@ public class SshKey {
 
 	private SshKeyFormat format;
 	private String comment;
-	private final KeyPair keyPair;
+	private KeyPair keyPair;
 
 	/**
 	 * Create a SSH key with given keypair
@@ -38,25 +38,35 @@ public class SshKey {
 		this.format = format == null ? SshKeyFormat.Undefined : format;
 		this.comment = comment;
 
-		String algorithm = null;
-		if (keyPair.getPublic() != null) {
-			algorithm = keyPair.getPublic().getAlgorithm();
+		if (keyPair != null) {
+			setKeyPair(keyPair);
 		}
-		if (keyPair.getPrivate() != null) {
-			if (algorithm != null && !algorithm.equals(keyPair.getPrivate().getAlgorithm())) {
-				throw new IllegalArgumentException("SSH cipher algorithm of public key ('" + algorithm + "') and private key ('" + keyPair.getPrivate().getAlgorithm() + "') do not match");
-			} else {
-				algorithm = keyPair.getPrivate().getAlgorithm();
-			}
-		}
+	}
 
-		if ("RSA".equals(algorithm)
-				|| "DSA".equals(algorithm)
-				|| "EC".equals(algorithm)
-				|| "EdDSA".equals(algorithm)) {
-			this.keyPair = keyPair;
+	protected void setKeyPair(final KeyPair keyPair) {
+		if (keyPair == null) {
+			this.keyPair = null;
 		} else {
-			throw new IllegalArgumentException("Unsupported SSH cipher algorithm for SSH key (only supports RSA / DSA / EC (ECDSA) / EdDSA): " + algorithm);
+			String algorithm = null;
+			if (keyPair.getPublic() != null) {
+				algorithm = keyPair.getPublic().getAlgorithm();
+			}
+			if (keyPair.getPrivate() != null) {
+				if (algorithm != null && !algorithm.equals(keyPair.getPrivate().getAlgorithm())) {
+					throw new IllegalArgumentException("SSH cipher algorithm of public key ('" + algorithm + "') and private key ('" + keyPair.getPrivate().getAlgorithm() + "') do not match");
+				} else {
+					algorithm = keyPair.getPrivate().getAlgorithm();
+				}
+			}
+
+			if ("RSA".equals(algorithm)
+					|| "DSA".equals(algorithm)
+					|| "EC".equals(algorithm)
+					|| "EdDSA".equals(algorithm)) {
+				this.keyPair = keyPair;
+			} else {
+				throw new IllegalArgumentException("Unsupported SSH cipher algorithm for SSH key (only supports RSA / DSA / EC (ECDSA) / EdDSA): " + algorithm);
+			}
 		}
 	}
 

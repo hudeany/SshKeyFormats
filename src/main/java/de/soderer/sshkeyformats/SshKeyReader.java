@@ -54,6 +54,9 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import de.soderer.sshkeyformats.SshKey.SshKeyFormat;
 import de.soderer.sshkeyformats.data.Asn1Codec;
 import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
+import de.soderer.sshkeyformats.data.AuthorizedKey;
+import de.soderer.sshkeyformats.data.AuthorizedKey.AuthorizedKeyType;
+import de.soderer.sshkeyformats.data.AuthorizedKeyLineParser;
 import de.soderer.sshkeyformats.data.BCryptPBKDF;
 import de.soderer.sshkeyformats.data.OID;
 import de.soderer.sshkeyformats.data.Password;
@@ -256,26 +259,40 @@ public class SshKeyReader {
 				final Map<String, String> keyProperties = readPuttyKeyProperties(dataReader);
 				keyProperties.put("PuTTY-User-Key-File-3", nextLine.split(" ", 2)[1]);
 				return readPuttyVersion3Key(keyProperties, password, skipPrivateKey);
-			} else if (nextLine.startsWith("ssh-rsa ")
-					|| nextLine.startsWith("ssh-dss ")
-					|| nextLine.startsWith("ecdsa-sha2-nistp256 ")
-					|| nextLine.startsWith("ecdsa-sha2-nistp384 ")
-					|| nextLine.startsWith("ecdsa-sha2-nistp521 ")
-					|| nextLine.startsWith("ssh-ed25519 ")
-					|| nextLine.startsWith("ssh-ed448 ")) {
-				final String[] keyParts = nextLine.split(" ", 3);
-				final byte[] keyData = Base64.getDecoder().decode(keyParts[1]);
-				String keyComment;
-				if (keyParts.length > 2) {
-					keyComment = keyParts[2];
-					keyComment = fixCommentEncodingIfNeeded(keyComment);
-				} else {
-					keyComment = null;
+			} else if (nextLine.contains("ssh-rsa ")
+					|| nextLine.contains("ssh-dss ")
+					|| nextLine.contains("ecdsa-sha2-nistp256 ")
+					|| nextLine.contains("ecdsa-sha2-nistp384 ")
+					|| nextLine.contains("ecdsa-sha2-nistp521 ")
+					|| nextLine.contains("ssh-ed25519 ")
+					|| nextLine.contains("ssh-ed448 ")) {
+				final AuthorizedKey authorizedKey = new AuthorizedKeyLineParser().parseAuthorizedKeyLine(nextLine);
+				byte[] keyData;
+				try {
+					keyData = Base64.getDecoder().decode(authorizedKey.getKeyString());
+				} catch (final Exception e) {
+					throw new Exception("AuthorizedKey key encoding is invalid for authorizedKey line \"" + nextLine + "\"", e);
 				}
-				return new SshKey(SshKeyFormat.OpenSSL, keyComment, new KeyPair(parsePublicKeyBytes(keyData), null));
+				authorizedKey.setKeyPair(new KeyPair(parsePublicKeyBytes(keyData), null));
+				if (authorizedKey.getKeyType() != AuthorizedKeyType.getTypeFromText(authorizedKey.getAlgorithm())) {
+					throw new Exception("AuthorizedKey keytype mismatch for authorizedKey line \"" + nextLine + "\". Public keys keytype is " + authorizedKey.getAlgorithm());
+				}
+				return authorizedKey;
+			} else if (isBase64(nextLine.trim())) {
+				final byte[] keyData = Base64.getDecoder().decode(nextLine.trim());
+				return new SshKey(SshKeyFormat.OpenSSL, null, new KeyPair(parsePublicKeyBytes(keyData), null));
 			} else {
 				throw new Exception("No keydata found");
 			}
+		}
+	}
+
+	private static boolean isBase64(final String nextLine) {
+		try {
+			Base64.getDecoder().decode(nextLine);
+			return true;
+		} catch (@SuppressWarnings("unused") final Exception e) {
+			return false;
 		}
 	}
 
@@ -1405,7 +1422,6 @@ public class SshKeyReader {
 		try {
 			final BlockDataReader publicKeyReader = new BlockDataReader(publicKeyData);
 			final String algorithmName = new String(publicKeyReader.readData(), StandardCharsets.UTF_8);
-
 
 			if ("ssh-rsa".equalsIgnoreCase(algorithmName)) {
 				final BigInteger publicExponent = publicKeyReader.readBigInt();
