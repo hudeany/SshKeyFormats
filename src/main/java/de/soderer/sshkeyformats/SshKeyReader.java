@@ -51,11 +51,10 @@ import org.bouncycastle.crypto.params.Argon2Parameters;
 import org.bouncycastle.jce.ECNamedCurveTable;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
+import de.soderer.sshkeyformats.AuthorizedKey.AuthorizedKeyType;
 import de.soderer.sshkeyformats.SshKey.SshKeyFormat;
 import de.soderer.sshkeyformats.data.Asn1Codec;
 import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
-import de.soderer.sshkeyformats.data.AuthorizedKey;
-import de.soderer.sshkeyformats.data.AuthorizedKey.AuthorizedKeyType;
 import de.soderer.sshkeyformats.data.AuthorizedKeyLineParser;
 import de.soderer.sshkeyformats.data.BCryptPBKDF;
 import de.soderer.sshkeyformats.data.OID;

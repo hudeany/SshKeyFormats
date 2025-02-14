@@ -1,14 +1,10 @@
-package de.soderer.sshkeyformats.data;
+package de.soderer.sshkeyformats;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
-import de.soderer.sshkeyformats.SshKey;
-import de.soderer.sshkeyformats.SshKeyReader;
 
 public class AuthorizedKey extends SshKey {
 	public enum AuthorizedKeyType {
@@ -40,16 +36,31 @@ public class AuthorizedKey extends SshKey {
 		}
 	}
 
-	private Map<String, String> environment;
-	private AuthorizedKeyType keyType;
-	private String keyString;
+	/**
+	 * <b>Watchout:</b>
+	 * "environment" settings need activated "PermitUserEnvironment" option in "/etc/ssh/sshd_config" file to take effect
+	 */
+	private Map<String, String> environment = null;
+	private String command;
+	private boolean certAuthority;
+	private String fromList;
+	private boolean noAgentForwarding;
+	private boolean noPortForwarding;
+	private boolean noPty;
+	private boolean noUserRc;
+	private boolean noX11Forwarding;
+	private String permitOpen;
+	private String principals;
+	private String tunnel;
+
+	private final AuthorizedKeyType keyType;
+	private final String keyString;
 
 	private transient String hash = null;
 
 	public AuthorizedKey(final AuthorizedKeyType type, final String keyString) throws Exception {
 		super(SshKeyFormat.OpenSSL, null, null);
 
-		environment = new HashMap<>();
 		keyType = type;
 		this.keyString = keyString;
 	}
@@ -57,7 +68,6 @@ public class AuthorizedKey extends SshKey {
 	public AuthorizedKey(final AuthorizedKeyType type, final String keyString, final String comment) throws Exception {
 		super(SshKeyFormat.OpenSSL, comment, null);
 
-		environment = new HashMap<>();
 		keyType = type;
 		this.keyString = keyString;
 	}
@@ -66,20 +76,8 @@ public class AuthorizedKey extends SshKey {
 	 * <b>Watchout:</b>
 	 * "environment" settings need activated "PermitUserEnvironment" option in "/etc/ssh/sshd_config" file to take effect
 	 *
-	 * @param environment
-	 * @param type
-	 * @param key
-	 * @param comment
-	 * @throws Exception
+	 * @return
 	 */
-	public AuthorizedKey(final Map<String, String> environment, final AuthorizedKeyType type, final String keyString, final String comment) throws Exception {
-		super(SshKeyFormat.OpenSSL, comment, null);
-
-		this.environment = environment;
-		keyType = type;
-		this.keyString = keyString;
-	}
-
 	public Map<String, String> getEnvironment() {
 		return environment;
 	}
@@ -113,18 +111,8 @@ public class AuthorizedKey extends SshKey {
 		return keyType;
 	}
 
-	public AuthorizedKey setKeyType(final AuthorizedKeyType keyType) {
-		this.keyType = keyType;
-		return this;
-	}
-
 	public String getKeyString() {
 		return keyString;
-	}
-
-	public AuthorizedKey setKeyString(final String keyString) {
-		this.keyString = keyString;
-		return this;
 	}
 
 	@Override
@@ -144,5 +132,93 @@ public class AuthorizedKey extends SshKey {
 			}
 		}
 		return hash;
+	}
+
+	public String getCommand() {
+		return command;
+	}
+
+	public void setCommand(final String command) {
+		this.command = command;
+	}
+
+	public boolean isCertAuthority() {
+		return certAuthority;
+	}
+
+	public void setCertAuthority(final boolean certAuthority) {
+		this.certAuthority = certAuthority;
+	}
+
+	public String getFromList() {
+		return fromList;
+	}
+
+	public void setFromList(final String fromList) {
+		this.fromList = fromList;
+	}
+
+	public boolean isNoAgentForwarding() {
+		return noAgentForwarding;
+	}
+
+	public void setNoAgentForwarding(final boolean noAgentForwarding) {
+		this.noAgentForwarding = noAgentForwarding;
+	}
+
+	public boolean isNoPortForwarding() {
+		return noPortForwarding;
+	}
+
+	public void setNoPortForwarding(final boolean noPortForwarding) {
+		this.noPortForwarding = noPortForwarding;
+	}
+
+	public boolean isNoPty() {
+		return noPty;
+	}
+
+	public void setNoPty(final boolean noPty) {
+		this.noPty = noPty;
+	}
+
+	public boolean isNoUserRc() {
+		return noUserRc;
+	}
+
+	public void setNoUserRc(final boolean noUserRc) {
+		this.noUserRc = noUserRc;
+	}
+
+	public boolean isNoX11Forwarding() {
+		return noX11Forwarding;
+	}
+
+	public void setNoX11Forwarding(final boolean noX11Forwarding) {
+		this.noX11Forwarding = noX11Forwarding;
+	}
+
+	public String getPermitOpen() {
+		return permitOpen;
+	}
+
+	public void setPermitOpen(final String permitOpen) {
+		this.permitOpen = permitOpen;
+	}
+
+	public String getPrincipals() {
+		return principals;
+	}
+
+	public void setPrincipals(final String principals) {
+		this.principals = principals;
+	}
+
+	public String getTunnel() {
+		return tunnel;
+	}
+
+	public void setTunnel(final String tunnel) {
+		this.tunnel = tunnel;
 	}
 }
