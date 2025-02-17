@@ -6,36 +6,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
+import de.soderer.sshkeyformats.data.Algorithm;
+
 public class AuthorizedKey extends SshKey {
-	public enum AuthorizedKeyType {
-		DSA("ssh-dss"),
-		RSA("ssh-rsa"),
-		NISTP256("ecdsa-sha2-nistp256"),
-		NISTP384("ecdsa-sha2-nistp384"),
-		NISTP521("ecdsa-sha2-nistp521"),
-		ED25519("ssh-ed25519"),
-		ED448("ssh-ed448");
-
-		private final String text;
-
-		AuthorizedKeyType(final String text) {
-			this.text = text;
-		}
-
-		public String getText() {
-			return text;
-		}
-
-		public static AuthorizedKeyType getTypeFromText(final String text) throws Exception {
-			for (final AuthorizedKeyType type : AuthorizedKeyType.values()) {
-				if (type.getText().equalsIgnoreCase(text)) {
-					return type;
-				}
-			}
-			throw new Exception("Unknown AuthorizedKeyType: " + text);
-		}
-	}
-
 	/**
 	 * <b>Watchout:</b>
 	 * "environment" settings need activated "PermitUserEnvironment" option in "/etc/ssh/sshd_config" file to take effect
@@ -53,19 +26,19 @@ public class AuthorizedKey extends SshKey {
 	private String principals;
 	private String tunnel;
 
-	private final AuthorizedKeyType keyType;
+	private final Algorithm keyType;
 	private final String keyString;
 
 	private transient String hash = null;
 
-	public AuthorizedKey(final AuthorizedKeyType type, final String keyString) throws Exception {
+	public AuthorizedKey(final Algorithm type, final String keyString) throws Exception {
 		super(SshKeyFormat.OpenSSL, null, null);
 
 		keyType = type;
 		this.keyString = keyString;
 	}
 
-	public AuthorizedKey(final AuthorizedKeyType type, final String keyString, final String comment) throws Exception {
+	public AuthorizedKey(final Algorithm type, final String keyString, final String comment) throws Exception {
 		super(SshKeyFormat.OpenSSL, comment, null);
 
 		keyType = type;
@@ -107,7 +80,7 @@ public class AuthorizedKey extends SshKey {
 		return this;
 	}
 
-	public AuthorizedKeyType getKeyType() {
+	public Algorithm getKeyType() {
 		return keyType;
 	}
 
@@ -118,15 +91,15 @@ public class AuthorizedKey extends SshKey {
 	@Override
 	public String toString() {
 		if (getComment() != null) {
-			return keyType.getText() + " " + keyString + " " + getComment();
+			return keyType.getSshAlgorithmId() + " " + keyString + " " + getComment();
 		} else {
-			return keyType.getText() + " " + keyString;
+			return keyType.getSshAlgorithmId() + " " + keyString;
 		}
 	}
 
 	public String getHash() throws Exception {
 		if (hash == null) {
-			try (InputStream inputStream = new ByteArrayInputStream((AuthorizedKeyType.RSA.getText() + " " + keyString + " noComment").getBytes(StandardCharsets.UTF_8))) {
+			try (InputStream inputStream = new ByteArrayInputStream((Algorithm.RSA.getSshAlgorithmId() + " " + keyString + " noComment").getBytes(StandardCharsets.UTF_8))) {
 				final List<SshKey> sshKeys = SshKeyReader.readAllPublicKeys(inputStream);
 				hash = sshKeys.get(0).getMd5Fingerprint().replace(":", "");
 			}

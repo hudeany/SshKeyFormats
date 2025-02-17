@@ -51,8 +51,8 @@ import org.bouncycastle.crypto.params.Argon2Parameters;
 import org.bouncycastle.jce.ECNamedCurveTable;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
-import de.soderer.sshkeyformats.AuthorizedKey.AuthorizedKeyType;
 import de.soderer.sshkeyformats.SshKey.SshKeyFormat;
+import de.soderer.sshkeyformats.data.Algorithm;
 import de.soderer.sshkeyformats.data.Asn1Codec;
 import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 import de.soderer.sshkeyformats.data.AuthorizedKeyLineParser;
@@ -258,13 +258,13 @@ public class SshKeyReader {
 				final Map<String, String> keyProperties = readPuttyKeyProperties(dataReader);
 				keyProperties.put("PuTTY-User-Key-File-3", nextLine.split(" ", 2)[1]);
 				return readPuttyVersion3Key(keyProperties, password, skipPrivateKey);
-			} else if (nextLine.contains("ssh-rsa ")
-					|| nextLine.contains("ssh-dss ")
-					|| nextLine.contains("ecdsa-sha2-nistp256 ")
-					|| nextLine.contains("ecdsa-sha2-nistp384 ")
-					|| nextLine.contains("ecdsa-sha2-nistp521 ")
-					|| nextLine.contains("ssh-ed25519 ")
-					|| nextLine.contains("ssh-ed448 ")) {
+			} else if (nextLine.contains(Algorithm.RSA.getSshAlgorithmId() + " ")
+					|| nextLine.contains(Algorithm.DSA.getSshAlgorithmId() + " ")
+					|| nextLine.contains(Algorithm.NISTP256.getSshAlgorithmId() + " ")
+					|| nextLine.contains(Algorithm.NISTP384.getSshAlgorithmId() + " ")
+					|| nextLine.contains(Algorithm.NISTP521.getSshAlgorithmId() + " ")
+					|| nextLine.contains(Algorithm.ED25519.getSshAlgorithmId() + " ")
+					|| nextLine.contains(Algorithm.ED448.getSshAlgorithmId() + " ")) {
 				final AuthorizedKey authorizedKey = new AuthorizedKeyLineParser().parseAuthorizedKeyLine(nextLine);
 				byte[] keyData;
 				try {
@@ -273,7 +273,7 @@ public class SshKeyReader {
 					throw new Exception("AuthorizedKey key encoding is invalid for authorizedKey line \"" + nextLine + "\"", e);
 				}
 				authorizedKey.setKeyPair(new KeyPair(parsePublicKeyBytes(keyData), null));
-				if (authorizedKey.getKeyType() != AuthorizedKeyType.getTypeFromText(authorizedKey.getAlgorithm())) {
+				if (authorizedKey.getKeyType() != authorizedKey.getAlgorithm()) {
 					throw new Exception("AuthorizedKey keytype mismatch for authorizedKey line \"" + nextLine + "\". Public keys keytype is " + authorizedKey.getAlgorithm());
 				}
 				return authorizedKey;
@@ -445,14 +445,14 @@ public class SshKeyReader {
 
 	private static PublicKey parsePublicKeyBytes(final byte[] data) throws Exception {
 		final BlockDataReader publicKeyReader = new BlockDataReader(data);
-		final String algorithmName = new String(publicKeyReader.readData(), StandardCharsets.UTF_8);
-		if ("ssh-rsa".equalsIgnoreCase(algorithmName)) {
+		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(new String(publicKeyReader.readData(), StandardCharsets.UTF_8));
+		if (Algorithm.RSA == algorithm) {
 			final BigInteger publicExponent = publicKeyReader.readBigInt();
 			final BigInteger modulus = publicKeyReader.readBigInt();
 
 			final KeyFactory keyFactory = KeyFactory.getInstance("RSA");
 			return keyFactory.generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
-		} else if ("ssh-dss".equalsIgnoreCase(algorithmName)) {
+		} else if (Algorithm.DSA == algorithm) {
 			final BigInteger p = publicKeyReader.readBigInt();
 			final BigInteger q = publicKeyReader.readBigInt();
 			final BigInteger g = publicKeyReader.readBigInt();
@@ -461,9 +461,9 @@ public class SshKeyReader {
 
 			final KeyFactory keyFactory = KeyFactory.getInstance("DSA");
 			return keyFactory.generatePublic(new DSAPublicKeySpec(y, p, q, g));
-		} else if ("ecdsa-sha2-nistp256".equalsIgnoreCase(algorithmName)
-				|| "ecdsa-sha2-nistp384".equalsIgnoreCase(algorithmName)
-				|| "ecdsa-sha2-nistp521".equalsIgnoreCase(algorithmName)) {
+		} else if (Algorithm.NISTP256 == algorithm
+				|| Algorithm.NISTP384 == algorithm
+				|| Algorithm.NISTP521 == algorithm) {
 			final String ecdsaCurveName = new String(publicKeyReader.readData(), StandardCharsets.UTF_8);
 			if (!"nistp256".equals(ecdsaCurveName)
 					&& !"nistp384".equals(ecdsaCurveName)
@@ -480,7 +480,7 @@ public class SshKeyReader {
 				final PublicKey publicKey = keyFactory.generatePublic(pubSpec);
 				return publicKey;
 			}
-		} else if ("ssh-ed25519".equalsIgnoreCase(algorithmName)) {
+		} else if (Algorithm.ED25519 == algorithm) {
 			final byte[] edDsaPublicKeyData = publicKeyReader.readData();
 
 			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
@@ -493,7 +493,7 @@ public class SshKeyReader {
 
 			final PublicKey publicKey = KeyFactory.getInstance("Ed25519").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed25519"), edECPoint));
 			return publicKey;
-		} else if ("ssh-ed448".equalsIgnoreCase(algorithmName)) {
+		} else if (Algorithm.ED448 == algorithm) {
 			final byte[] edDsaPublicKeyData = publicKeyReader.readData();
 
 			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
@@ -507,7 +507,7 @@ public class SshKeyReader {
 			final PublicKey publicKey = KeyFactory.getInstance("Ed448").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed448"), edECPoint));
 			return publicKey;
 		} else {
-			throw new IllegalArgumentException("Invalid public key algorithm for PuTTY key (only supports RSA / DSA / ECDSA / EdDSA): " + algorithmName);
+			throw new IllegalArgumentException("Invalid public key algorithm for PuTTY key (only supports RSA / DSA / ECDSA / EdDSA): " + algorithm.name());
 		}
 	}
 
@@ -869,9 +869,9 @@ public class SshKeyReader {
 
 	private static PublicKey readOpenSshv1PublicKey(final byte[] publicKeyData) throws Exception {
 		final BlockDataReader publicKeyDataReader = new BlockDataReader(publicKeyData);
-		final String algorithmType = new String(publicKeyDataReader.readData(), StandardCharsets.UTF_8);
+		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(new String(publicKeyDataReader.readData(), StandardCharsets.UTF_8));
 
-		if ("ssh-rsa".equals(algorithmType)) {
+		if (Algorithm.RSA == algorithm) {
 			final BigInteger publicExponent = publicKeyDataReader.readBigInt();
 			final BigInteger modulus = publicKeyDataReader.readBigInt();
 
@@ -882,7 +882,7 @@ public class SshKeyReader {
 			final KeyFactory keyFactory = KeyFactory.getInstance("RSA");
 			final PublicKey publicKey = keyFactory.generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
 			return publicKey;
-		} else if ("ssh-dss".equals(algorithmType)) {
+		} else if (Algorithm.DSA == algorithm) {
 			final BigInteger p = publicKeyDataReader.readBigInt();
 			final BigInteger q = publicKeyDataReader.readBigInt();
 			final BigInteger g = publicKeyDataReader.readBigInt();
@@ -895,7 +895,9 @@ public class SshKeyReader {
 			final KeyFactory keyFactory = KeyFactory.getInstance("DSA");
 			final PublicKey publicKey = keyFactory.generatePublic(new DSAPublicKeySpec(y, p, q, g));
 			return publicKey;
-		} else if (algorithmType.startsWith("ecdsa-sha2-")) {
+		} else if (Algorithm.NISTP256 == algorithm
+				|| Algorithm.NISTP384 == algorithm
+				|| Algorithm.NISTP521 == algorithm) {
 			final String ecdsaCurveName = new String(publicKeyDataReader.readData(), StandardCharsets.UTF_8);
 
 			final byte[] eccKeyBlobBytes = publicKeyDataReader.readData();
@@ -912,7 +914,7 @@ public class SshKeyReader {
 			final PublicKey publicKey = keyFactory.generatePublic(pubSpec);
 
 			return publicKey;
-		} else if ("ssh-ed25519".equals(algorithmType)) {
+		} else if (Algorithm.ED25519 == algorithm) {
 			final byte[] edDsaPublicKeyData = publicKeyDataReader.readData();
 
 			if (publicKeyDataReader.isMoreDataAvailable()) {
@@ -929,7 +931,7 @@ public class SshKeyReader {
 
 			final PublicKey publicKey = KeyFactory.getInstance("Ed25519").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed25519"), edECPoint));
 			return publicKey;
-		} else if ("ssh-ed448".equals(algorithmType)) {
+		} else if (Algorithm.ED448 == algorithm) {
 			final byte[] edDsaPublicKeyData = publicKeyDataReader.readData();
 
 			if (publicKeyDataReader.isMoreDataAvailable()) {
@@ -947,7 +949,7 @@ public class SshKeyReader {
 			final PublicKey publicKey = KeyFactory.getInstance("Ed448").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed448"), edECPoint));
 			return publicKey;
 		} else {
-			throw new Exception("Unexpected key type '" + algorithmType + "'");
+			throw new Exception("Unexpected key type '" + algorithm.name() + "'");
 		}
 	}
 
@@ -960,9 +962,9 @@ public class SshKeyReader {
 			throw new WrongPasswordException();
 		}
 
-		final String algorithmName = new String(privateKeyDataReader.readData(), StandardCharsets.UTF_8);
+		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(new String(privateKeyDataReader.readData(), StandardCharsets.UTF_8));
 
-		if ("ssh-rsa".equals(algorithmName)) {
+		if (Algorithm.RSA == algorithm) {
 			final BigInteger modulus = new BigInteger(privateKeyDataReader.readData());
 			final BigInteger publicExponent = new BigInteger(privateKeyDataReader.readData());
 			final BigInteger privateExponent = new BigInteger(privateKeyDataReader.readData());
@@ -990,7 +992,7 @@ public class SshKeyReader {
 			final PrivateKey privateKey = keyFactory.generatePrivate(new RSAPrivateCrtKeySpec(modulus, publicExponent, privateExponent, primeP, primeQ, primeExponentP, primeExponentQ, crtCoefficient));
 
 			return new SshKey(SshKeyFormat.OpenSSHv1, keyComment, new KeyPair(publicKey, privateKey));
-		} else if ("ssh-dss".equals(algorithmName)) {
+		} else if (Algorithm.DSA == algorithm) {
 			final BigInteger p = new BigInteger(privateKeyDataReader.readData());
 			final BigInteger q = new BigInteger(privateKeyDataReader.readData());
 			final BigInteger g = new BigInteger(privateKeyDataReader.readData());
@@ -1013,7 +1015,9 @@ public class SshKeyReader {
 			final PrivateKey privateKey = keyFactory.generatePrivate(new DSAPrivateKeySpec(x, p, q, g));
 
 			return new SshKey(SshKeyFormat.OpenSSHv1, keyComment, new KeyPair(publicKey, privateKey));
-		} else if (algorithmName.startsWith("ecdsa-sha2-")) {
+		} else if (Algorithm.NISTP256 == algorithm
+				|| Algorithm.NISTP384 == algorithm
+				|| Algorithm.NISTP521 == algorithm) {
 			final String ecdsaCurveName = new String(privateKeyDataReader.readData(), StandardCharsets.UTF_8);
 
 			final byte[] eccKeyBlobBytes = privateKeyDataReader.readData();
@@ -1042,7 +1046,7 @@ public class SshKeyReader {
 			final org.bouncycastle.jce.spec.ECPublicKeySpec pubSpec = new org.bouncycastle.jce.spec.ECPublicKeySpec(point, ecSpec);
 			final PublicKey publicKey = keyFactory.generatePublic(pubSpec);
 			return new SshKey(SshKeyFormat.OpenSSHv1, keyComment, new KeyPair(publicKey, privateKey));
-		} else if ("ssh-ed25519".equals(algorithmName)) {
+		} else if (Algorithm.ED25519 == algorithm) {
 			final BigInteger checkBigInt1 = new BigInteger(privateKeyDataReader.readData());
 
 			final byte[] secretKeyBytes = privateKeyDataReader.readData();
@@ -1075,7 +1079,7 @@ public class SshKeyReader {
 			final PublicKey publicKey = KeyFactory.getInstance("Ed25519").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed25519"), edECPoint));
 			final PrivateKey privateKey = KeyFactory.getInstance("Ed25519").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed25519"), privateKeyBytes));
 			return new SshKey(SshKeyFormat.OpenSSHv1, keyComment, new KeyPair(publicKey, privateKey));
-		} else if ("ssh-ed448".equals(algorithmName)) {
+		} else if (Algorithm.ED448 == algorithm) {
 			final BigInteger checkBigInt1 = new BigInteger(privateKeyDataReader.readData());
 
 			final byte[] secretKeyBytes = privateKeyDataReader.readData();
@@ -1110,7 +1114,7 @@ public class SshKeyReader {
 			final PrivateKey privateKey = KeyFactory.getInstance("Ed448").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed448"), privateKeyBytes));
 			return new SshKey(SshKeyFormat.OpenSSHv1, keyComment, new KeyPair(publicKey, privateKey));
 		} else {
-			throw new Exception("Unexpected key type '" + algorithmName + "'");
+			throw new Exception("Unexpected key type '" + algorithm.name() + "'");
 		}
 	}
 
@@ -1171,15 +1175,15 @@ public class SshKeyReader {
 	}
 
 	private static SshKey readPuttyVersion2Key(final Map<String, String> keyProperties, final Password password, final boolean skipPrivateKey) throws Exception {
-		final String algorithmName = keyProperties.get("PuTTY-User-Key-File-2");
-		if (!"ssh-rsa".equalsIgnoreCase(algorithmName)
-				&& !"ssh-dss".equalsIgnoreCase(algorithmName)
-				&& !"ecdsa-sha2-nistp256".equalsIgnoreCase(algorithmName)
-				&& !"ecdsa-sha2-nistp384".equalsIgnoreCase(algorithmName)
-				&& !"ecdsa-sha2-nistp521".equalsIgnoreCase(algorithmName)
-				&& !"ssh-ed25519".equalsIgnoreCase(algorithmName)
-				&& !"ssh-ed448".equalsIgnoreCase(algorithmName)) {
-			throw new Exception("Unsupported chipher: " + algorithmName);
+		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(keyProperties.get("PuTTY-User-Key-File-2"));
+		if (Algorithm.RSA != algorithm
+				&& Algorithm.DSA != algorithm
+				&& Algorithm.NISTP256 != algorithm
+				&& Algorithm.NISTP384 != algorithm
+				&& Algorithm.NISTP521 != algorithm
+				&& Algorithm.ED25519 != algorithm
+				&& Algorithm.ED448 != algorithm) {
+			throw new Exception("Unsupported chipher: " + algorithm.name());
 		} else {
 			final Decoder base64Decoder = Base64.getDecoder();
 
@@ -1219,7 +1223,7 @@ public class SshKeyReader {
 			}
 
 			try {
-				final String calculatedMacChecksum = calculatePuttyMacChecksumVersion2(passwordByteArray, algorithmName, keyProperties.get("Encryption"), keyProperties.get("Comment"), publicKeyData, privateKeyData);
+				final String calculatedMacChecksum = calculatePuttyMacChecksumVersion2(passwordByteArray, algorithm, keyProperties.get("Encryption"), keyProperties.get("Comment"), publicKeyData, privateKeyData);
 				final String foundMacChecksum = keyProperties.get("Private-MAC");
 				if (foundMacChecksum == null || !foundMacChecksum.equalsIgnoreCase(calculatedMacChecksum)) {
 					throw new WrongPasswordException();
@@ -1252,7 +1256,7 @@ public class SshKeyReader {
 		return puttyKeyEncryptionKey;
 	}
 
-	private static String calculatePuttyMacChecksumVersion2(final byte[] passwordBytes, final String keyType, final String encryptionType, final String comment, final byte[] publicKey, final byte[] privateKey) throws Exception {
+	private static String calculatePuttyMacChecksumVersion2(final byte[] passwordBytes, final Algorithm algorithm, final String encryptionType, final String comment, final byte[] publicKey, final byte[] privateKey) throws Exception {
 		final MessageDigest digest = MessageDigest.getInstance("SHA-1");
 		digest.update("putty-private-key-file-mac-key".getBytes(StandardCharsets.UTF_8));
 		if (passwordBytes != null) {
@@ -1266,7 +1270,7 @@ public class SshKeyReader {
 		final ByteArrayOutputStream out = new ByteArrayOutputStream();
 		final DataOutputStream data = new DataOutputStream(out);
 
-		final byte[] keyTypeBytes = keyType.getBytes(StandardCharsets.ISO_8859_1);
+		final byte[] keyTypeBytes = algorithm.getSshAlgorithmId().getBytes(StandardCharsets.ISO_8859_1);
 		data.writeInt(keyTypeBytes.length);
 		data.write(keyTypeBytes);
 
@@ -1288,15 +1292,15 @@ public class SshKeyReader {
 	}
 
 	private static SshKey readPuttyVersion3Key(final Map<String, String> keyProperties, final Password password, final boolean skipPrivateKey) throws Exception {
-		final String cipherName = keyProperties.get("PuTTY-User-Key-File-3");
-		if (!"ssh-rsa".equalsIgnoreCase(cipherName)
-				&& !"ssh-dss".equalsIgnoreCase(cipherName)
-				&& !"ecdsa-sha2-nistp256".equalsIgnoreCase(cipherName)
-				&& !"ecdsa-sha2-nistp384".equalsIgnoreCase(cipherName)
-				&& !"ecdsa-sha2-nistp521".equalsIgnoreCase(cipherName)
-				&& !"ssh-ed25519".equalsIgnoreCase(cipherName)
-				&& !"ssh-ed448".equalsIgnoreCase(cipherName)) {
-			throw new Exception("Unsupported chipher: " + cipherName);
+		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(keyProperties.get("PuTTY-User-Key-File-3"));
+		if (Algorithm.RSA != algorithm
+				&& Algorithm.DSA != algorithm
+				&& Algorithm.NISTP256 != algorithm
+				&& Algorithm.NISTP384 != algorithm
+				&& Algorithm.NISTP521 != algorithm
+				&& Algorithm.ED25519 != algorithm
+				&& Algorithm.ED448 != algorithm) {
+			throw new Exception("Unsupported chipher: " + algorithm.name());
 		}
 
 		final Decoder base64Decoder = Base64.getDecoder();
@@ -1338,9 +1342,9 @@ public class SshKeyReader {
 			try {
 				final String calculatedMacChecksum;
 				if ("none".equalsIgnoreCase(encryptionMethod)) {
-					calculatedMacChecksum = calculatePuttyMacChecksumVersion3Argon2(cipherName, "none", keyProperties.get("Comment"), publicKeyData, privateKeyData, puttyKeyEncryptionKey);
+					calculatedMacChecksum = calculatePuttyMacChecksumVersion3Argon2(algorithm, "none", keyProperties.get("Comment"), publicKeyData, privateKeyData, puttyKeyEncryptionKey);
 				} else if ("aes256-cbc".equalsIgnoreCase(encryptionMethod)) {
-					calculatedMacChecksum = calculatePuttyMacChecksumVersion3Argon2(cipherName, keyProperties.get("Encryption"), keyProperties.get("Comment"), publicKeyData, privateKeyData, puttyKeyEncryptionKey);
+					calculatedMacChecksum = calculatePuttyMacChecksumVersion3Argon2(algorithm, keyProperties.get("Encryption"), keyProperties.get("Comment"), publicKeyData, privateKeyData, puttyKeyEncryptionKey);
 				} else {
 					throw new Exception("Unsupported key encryption method: " + keyProperties.get("Encryption"));
 				}
@@ -1385,7 +1389,7 @@ public class SshKeyReader {
 		return puttyKeyEncryptionKey;
 	}
 
-	private static String calculatePuttyMacChecksumVersion3Argon2(final String keyType, final String encryptionType, final String comment, final byte[] publicKey, final byte[] privateKey, final byte[] puttyKeyEncryptionKey) throws Exception {
+	private static String calculatePuttyMacChecksumVersion3Argon2(final Algorithm algorithm, final String encryptionType, final String comment, final byte[] publicKey, final byte[] privateKey, final byte[] puttyKeyEncryptionKey) throws Exception {
 		final Mac mac = Mac.getInstance("HMACSHA256");
 		if (puttyKeyEncryptionKey != null) {
 			mac.init(new SecretKeySpec(puttyKeyEncryptionKey, 48, 32, mac.getAlgorithm()));
@@ -1396,7 +1400,7 @@ public class SshKeyReader {
 		final ByteArrayOutputStream out = new ByteArrayOutputStream();
 		final DataOutputStream data = new DataOutputStream(out);
 
-		final byte[] keyTypeBytes = keyType.getBytes(StandardCharsets.ISO_8859_1);
+		final byte[] keyTypeBytes = algorithm.getSshAlgorithmId().getBytes(StandardCharsets.ISO_8859_1);
 		data.writeInt(keyTypeBytes.length);
 		data.write(keyTypeBytes);
 
@@ -1420,9 +1424,9 @@ public class SshKeyReader {
 	private static KeyPair readPuttyKeyData(final byte[] privateKeyData, final byte[] publicKeyData) throws Exception {
 		try {
 			final BlockDataReader publicKeyReader = new BlockDataReader(publicKeyData);
-			final String algorithmName = new String(publicKeyReader.readData(), StandardCharsets.UTF_8);
+			final Algorithm algorithm = Algorithm.getForSshAlgorithmId(new String(publicKeyReader.readData(), StandardCharsets.UTF_8));
 
-			if ("ssh-rsa".equalsIgnoreCase(algorithmName)) {
+			if (Algorithm.RSA == algorithm) {
 				final BigInteger publicExponent = publicKeyReader.readBigInt();
 				final BigInteger modulus = publicKeyReader.readBigInt();
 
@@ -1445,7 +1449,7 @@ public class SshKeyReader {
 					final PrivateKey privateKey = keyFactory.generatePrivate(new RSAPrivateCrtKeySpec(modulus, publicExponent, privateExponent, p, q, dmp1, dmq1, iqmp));
 					return new KeyPair(publicKey, privateKey);
 				}
-			} else if ("ssh-dss".equalsIgnoreCase(algorithmName)) {
+			} else if (Algorithm.DSA == algorithm) {
 				final BigInteger p = publicKeyReader.readBigInt();
 				final BigInteger q = publicKeyReader.readBigInt();
 				final BigInteger g = publicKeyReader.readBigInt();
@@ -1467,9 +1471,9 @@ public class SshKeyReader {
 					final PrivateKey privateKey = keyFactory.generatePrivate(new DSAPrivateKeySpec(x, p, q, g));
 					return new KeyPair(publicKey, privateKey);
 				}
-			} else if ("ecdsa-sha2-nistp256".equalsIgnoreCase(algorithmName)
-					|| "ecdsa-sha2-nistp384".equalsIgnoreCase(algorithmName)
-					|| "ecdsa-sha2-nistp521".equalsIgnoreCase(algorithmName)) {
+			} else if (Algorithm.NISTP256 == algorithm
+					|| Algorithm.NISTP384 == algorithm
+					|| Algorithm.NISTP521 == algorithm) {
 				final String ecdsaCurveName = new String(publicKeyReader.readData(), StandardCharsets.UTF_8);
 				if (!"nistp256".equals(ecdsaCurveName)
 						&& !"nistp384".equals(ecdsaCurveName)
@@ -1499,7 +1503,7 @@ public class SshKeyReader {
 						return new KeyPair(publicKey, privateKey);
 					}
 				}
-			} else if ("ssh-ed25519".equalsIgnoreCase(algorithmName)) {
+			} else if (Algorithm.ED25519 == algorithm) {
 				final byte[] edDsaPublicKeyData = publicKeyReader.readData();
 
 				final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
@@ -1520,7 +1524,7 @@ public class SshKeyReader {
 					final PrivateKey privateKey = KeyFactory.getInstance("Ed25519").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed25519"), privateKeyBytes));
 					return new KeyPair(publicKey, privateKey);
 				}
-			} else if ("ssh-ed448".equalsIgnoreCase(algorithmName)) {
+			} else if (Algorithm.ED448 == algorithm) {
 				final byte[] edDsaPublicKeyData = publicKeyReader.readData();
 
 				final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
@@ -1542,7 +1546,7 @@ public class SshKeyReader {
 					return new KeyPair(publicKey, privateKey);
 				}
 			} else {
-				throw new IllegalArgumentException("Invalid public key algorithm for PuTTY key (only supports RSA / DSA / ECDSA / EdDSA): " + algorithmName);
+				throw new IllegalArgumentException("Invalid public key algorithm for PuTTY key (only supports RSA / DSA / ECDSA / EdDSA): " + algorithm.name());
 			}
 		} catch (final Exception e) {
 			throw new Exception("Cannot read key data", e);

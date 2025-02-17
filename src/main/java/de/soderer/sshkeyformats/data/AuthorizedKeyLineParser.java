@@ -4,7 +4,6 @@ import java.util.Base64;
 import java.util.Map;
 
 import de.soderer.sshkeyformats.AuthorizedKey;
-import de.soderer.sshkeyformats.AuthorizedKey.AuthorizedKeyType;
 
 public class AuthorizedKeyLineParser {
 	private static String COMMAND_PREFIX = "command=";
@@ -101,7 +100,7 @@ public class AuthorizedKeyLineParser {
 			}
 
 			final String keyTypeString = getNextStringBlock();
-			final AuthorizedKeyType keyType = AuthorizedKeyType.getTypeFromText(keyTypeString);
+			final Algorithm keyType = Algorithm.getForSshAlgorithmId(keyTypeString);
 
 			final String key = getNextStringBlock();
 			try {

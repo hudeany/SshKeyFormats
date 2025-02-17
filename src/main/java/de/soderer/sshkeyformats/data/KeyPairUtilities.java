@@ -110,7 +110,7 @@ public class KeyPairUtilities {
 	 * "ssh-dss" for DSA key<br />
 	 * "ecdsa-sha2-nistp256" or "ecdsa-sha2-nistp384" or "ecdsa-sha2-nistp521" for ECDSA key<br />
 	 */
-	public static String getAlgorithm(final KeyPair keyPair) throws Exception {
+	public static Algorithm getAlgorithm(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
 		} else if (keyPair.getPrivate() != null) {
@@ -128,23 +128,32 @@ public class KeyPairUtilities {
 	 * "ssh-dss" for DSA key<br />
 	 * "ecdsa-sha2-nistp256" or "ecdsa-sha2-nistp384" or "ecdsa-sha2-nistp521" for ECDSA key<br />
 	 */
-	public static String getAlgorithm(final PublicKey publicKey) throws Exception {
+	public static Algorithm getAlgorithm(final PublicKey publicKey) throws Exception {
 		if (publicKey == null){
 			throw new Exception("Invalid empty publicKey parameter");
 		} else if ("RSA".equals(publicKey.getAlgorithm())) {
-			return "ssh-rsa";
+			return Algorithm.RSA;
 		} else if ("DSA".equals(publicKey.getAlgorithm())) {
-			return "ssh-dss";
+			return Algorithm.DSA;
 		} else if ("EC".equals(publicKey.getAlgorithm()) || "ECDSA".equals(publicKey.getAlgorithm())) {
-			return "ecdsa-sha2-" + CryptographicUtilities.getEcDsaEllipticCurveName((ECPublicKey) publicKey);
-		} else if ("EdDSA".equals(publicKey.getAlgorithm())) {
-			final EdECPublicKey publicEdDsaKey = (EdECPublicKey) publicKey;
-			if ("Ed25519".equals(publicEdDsaKey.getParams().getName())) {
-				return "ssh-ed25519";
-			} else if ("Ed448".equals(publicEdDsaKey.getParams().getName())) {
-				return "ssh-ed448";
+			final String nistCipher = CryptographicUtilities.getEcDsaEllipticCurveName((ECPublicKey) publicKey);
+			if ("nistp256".equalsIgnoreCase(nistCipher)) {
+				return Algorithm.NISTP256;
+			} else if ("nistp384".equalsIgnoreCase(nistCipher)) {
+				return Algorithm.NISTP384;
+			} else if ("nistp521".equalsIgnoreCase(nistCipher)) {
+				return Algorithm.NISTP521;
 			} else {
-				throw new Exception("Unsupported EdDSA algorithm name: " + publicEdDsaKey.getParams().getName());
+				throw new IllegalArgumentException("Unknown NIST public key cipher: " + nistCipher);
+			}
+		} else if ("EdDSA".equals(publicKey.getAlgorithm())) {
+			final String ecCipher = ((EdECPublicKey) publicKey).getParams().getName();
+			if ("Ed25519".equals(ecCipher)) {
+				return Algorithm.ED25519;
+			} else if ("Ed448".equals(ecCipher)) {
+				return Algorithm.ED448;
+			} else {
+				throw new Exception("Unsupported EdDSA algorithm name: " + ecCipher);
 			}
 		} else {
 			throw new Exception("Unsupported ssh algorithm name: " + publicKey.getAlgorithm());
@@ -157,23 +166,32 @@ public class KeyPairUtilities {
 	 * "ssh-dss" for DSA key<br />
 	 * "ecdsa-sha2-nistp256" or "ecdsa-sha2-nistp384" or "ecdsa-sha2-nistp521" for ECDSA key<br />
 	 */
-	public static String getAlgorithm(final PrivateKey privateKey) throws Exception {
+	public static Algorithm getAlgorithm(final PrivateKey privateKey) throws Exception {
 		if (privateKey == null){
 			throw new Exception("Invalid empty privateKey parameter");
 		} else if (privateKey instanceof RSAPrivateCrtKey) {
-			return "ssh-rsa";
+			return Algorithm.RSA;
 		} else if (privateKey instanceof DSAPrivateKey) {
-			return "ssh-dss";
+			return Algorithm.DSA;
 		} else if (privateKey instanceof ECPrivateKey) {
-			return "ecdsa-sha2-" + CryptographicUtilities.getEcDsaEllipticCurveName((ECPrivateKey) privateKey);
-		} else if (privateKey instanceof EdECPrivateKey) {
-			final EdECPrivateKey privateKeyEdEC = (EdECPrivateKey) privateKey;
-			if ("Ed25519".equalsIgnoreCase(privateKeyEdEC.getParams().getName())) {
-				return "ssh-ed25519";
-			} else if ("Ed448".equalsIgnoreCase(privateKeyEdEC.getParams().getName())) {
-				return "ssh-ed448";
+			final String nistCipher = CryptographicUtilities.getEcDsaEllipticCurveName((ECPrivateKey) privateKey);
+			if ("nistp256".equalsIgnoreCase(nistCipher)) {
+				return Algorithm.NISTP256;
+			} else if ("nistp384".equalsIgnoreCase(nistCipher)) {
+				return Algorithm.NISTP384;
+			} else if ("nistp521".equalsIgnoreCase(nistCipher)) {
+				return Algorithm.NISTP521;
 			} else {
-				throw new Exception("Unknown EdDSA type: " + privateKeyEdEC.getParams().getName());
+				throw new IllegalArgumentException("Unknown NIST private key cipher: " + nistCipher);
+			}
+		} else if (privateKey instanceof EdECPrivateKey) {
+			final String ecCipher = ((EdECPrivateKey) privateKey).getParams().getName();
+			if ("Ed25519".equalsIgnoreCase(ecCipher)) {
+				return Algorithm.ED25519;
+			} else if ("Ed448".equalsIgnoreCase(ecCipher)) {
+				return Algorithm.ED448;
+			} else {
+				throw new Exception("Unknown EdDSA type: " + ecCipher);
 			}
 		} else {
 			throw new IllegalArgumentException("Unknown private key cipher");
@@ -192,19 +210,19 @@ public class KeyPairUtilities {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
 		} else {
-			final String algorithmName = getAlgorithm(publicKey);
-			if ("ssh-rsa".equalsIgnoreCase(algorithmName)) {
+			final Algorithm algorithm = getAlgorithm(publicKey);
+			if (Algorithm.RSA == algorithm) {
 				return ((RSAPublicKey) publicKey).getModulus().bitLength();
-			} else if ("ssh-dss".equalsIgnoreCase(algorithmName)) {
+			} else if (Algorithm.DSA == algorithm) {
 				return ((DSAPublicKey) publicKey).getY().bitLength();
-			} else if ("ecdsa-sha2-nistp256".equalsIgnoreCase(algorithmName)) {
+			} else if (Algorithm.NISTP256 == algorithm) {
 				return 256;
-			} else if ("ecdsa-sha2-nistp384".equalsIgnoreCase(algorithmName)) {
+			} else if (Algorithm.NISTP384 == algorithm) {
 				return 384;
-			} else if ("ecdsa-sha2-nistp521".equalsIgnoreCase(algorithmName)) {
+			} else if (Algorithm.NISTP521 == algorithm) {
 				return 521;
 			} else {
-				throw new Exception("Unsupported ssh algorithm name: " + algorithmName);
+				throw new Exception("Unsupported ssh algorithm name: " + algorithm.name());
 			}
 		}
 	}
@@ -213,17 +231,17 @@ public class KeyPairUtilities {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
 		} else {
+			final Algorithm algorithm = getAlgorithm(publicKey);
 			final BlockDataWriter publicKeyWriter = new BlockDataWriter();
-			final String algorithmName = getAlgorithm(publicKey);
 			if (publicKey instanceof RSAPublicKey) {
 				final RSAPublicKey publicKeyRSA = (RSAPublicKey) publicKey;
-				publicKeyWriter.writeString("ssh-rsa");
+				publicKeyWriter.writeString(algorithm.getSshAlgorithmId());
 				publicKeyWriter.writeBigInt(publicKeyRSA.getPublicExponent());
 				publicKeyWriter.writeBigInt(publicKeyRSA.getModulus());
 				return publicKeyWriter.toByteArray();
 			} else if (publicKey instanceof DSAPublicKey) {
 				final DSAPublicKey publicKeyDSA = (DSAPublicKey) publicKey;
-				publicKeyWriter.writeString("ssh-dss");
+				publicKeyWriter.writeString(algorithm.getSshAlgorithmId());
 				publicKeyWriter.writeBigInt(publicKeyDSA.getParams().getP());
 				publicKeyWriter.writeBigInt(publicKeyDSA.getParams().getQ());
 				publicKeyWriter.writeBigInt(publicKeyDSA.getParams().getG());
@@ -231,7 +249,7 @@ public class KeyPairUtilities {
 			} else if (publicKey instanceof ECPublicKey) {
 				final ECPublicKey publicKeyEC = (ECPublicKey) publicKey;
 				final String ecCurveName = CryptographicUtilities.getEcDsaEllipticCurveName(publicKeyEC);
-				publicKeyWriter.writeString(algorithmName);
+				publicKeyWriter.writeString(algorithm.getSshAlgorithmId());
 				publicKeyWriter.writeString(ecCurveName);
 
 				final DerTag enclosingDerTag = Asn1Codec.readDerTag(publicKeyEC.getEncoded());
@@ -267,10 +285,10 @@ public class KeyPairUtilities {
 				final EdECPublicKey publicKeyEdEC = (EdECPublicKey) publicKey;
 				int publicKeyDataLength;
 				if ("Ed25519".equalsIgnoreCase(publicKeyEdEC.getParams().getName())) {
-					publicKeyWriter.writeString("ssh-ed25519");
+					publicKeyWriter.writeString(algorithm.getSshAlgorithmId());
 					publicKeyDataLength = 32;
 				} else if ("Ed448".equalsIgnoreCase(publicKeyEdEC.getParams().getName())) {
-					publicKeyWriter.writeString("ssh-ed448");
+					publicKeyWriter.writeString(algorithm.getSshAlgorithmId());
 					publicKeyDataLength = 57;
 				} else {
 					throw new Exception("Unknown EdDSA type: " + publicKeyEdEC.getParams().getName());
@@ -281,7 +299,7 @@ public class KeyPairUtilities {
 				System.arraycopy(javaEncoding, javaEncoding.length - publicKeyDataLength, publicKeyData, 0, publicKeyDataLength);
 				publicKeyWriter.writeData(publicKeyData);
 			} else {
-				throw new Exception("Unsupported algorithm name: " + algorithmName);
+				throw new Exception("Unsupported algorithm name: " + algorithm.name());
 			}
 			return publicKeyWriter.toByteArray();
 		}

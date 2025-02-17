@@ -2,6 +2,7 @@ package de.soderer.sshkeyformats;
 
 import java.security.KeyPair;
 
+import de.soderer.sshkeyformats.data.Algorithm;
 import de.soderer.sshkeyformats.data.KeyPairUtilities;
 
 /**
@@ -70,7 +71,7 @@ public class SshKey {
 		}
 	}
 
-	public String getAlgorithm() throws Exception {
+	public Algorithm getAlgorithm() throws Exception {
 		return KeyPairUtilities.getAlgorithm(keyPair);
 	}
 
