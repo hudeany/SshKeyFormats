@@ -74,6 +74,7 @@ public class AuthorizedKeyLineParserTest {
 		Assert.assertEquals(Algorithm.ED25519, key8.getKeyType());
 		Assert.assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key8.getKeyString());
 		Assert.assertEquals(null, key8.getComment());
+		Assert.assertEquals("DDF0BB6EB54E22BB80C0F256C76D5ADF", key8.getHash());
 	}
 
 	@Test

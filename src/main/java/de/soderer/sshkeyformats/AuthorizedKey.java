@@ -99,10 +99,13 @@ public class AuthorizedKey extends SshKey {
 
 	public String getHash() throws Exception {
 		if (hash == null) {
-			try (InputStream inputStream = new ByteArrayInputStream((Algorithm.RSA.getSshAlgorithmId() + " " + keyString + " noComment").getBytes(StandardCharsets.UTF_8))) {
-				final List<SshKey> sshKeys = SshKeyReader.readAllPublicKeys(inputStream);
-				hash = sshKeys.get(0).getMd5Fingerprint().replace(":", "");
+			if (getKeyPair() == null) {
+				try (InputStream inputStream = new ByteArrayInputStream(keyString.getBytes(StandardCharsets.UTF_8))) {
+					final List<SshKey> sshKeys = SshKeyReader.readAllPublicKeys(inputStream);
+					setKeyPair(sshKeys.get(0).getKeyPair());
+				}
 			}
+			hash = getMd5Fingerprint().replace(":", "");
 		}
 		return hash;
 	}
