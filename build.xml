@@ -32,8 +32,8 @@
 			</fileset>
 		</delete>
 	
-		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk15on/1.70/bcprov-jdk15on-1.70.jar" dest="lib/" />
-		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcpkix-jdk15on/1.70/bcpkix-jdk15on-1.70.jar" dest="lib/" />
+		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk18on/1.80/bcprov-jdk18on-1.80.jar" dest="lib/" />
+		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcpkix-jdk18on/1.80/bcpkix-jdk18on-1.80.jar" dest="lib/" />
 		
 		<mkdir dir="lib_test/" />
 		<delete includeEmptyDirs="true">
