@@ -517,7 +517,7 @@ public class KeyPairUtilities {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
 		} else {
-			return getAlgorithm(publicKey) + " " + new String(Base64.getEncoder().encode(getPublicKeyBytes(publicKey)));
+			return getAlgorithm(publicKey).getSshAlgorithmId() + " " + new String(Base64.getEncoder().encode(getPublicKeyBytes(publicKey)));
 		}
 	}
 
