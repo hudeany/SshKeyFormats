@@ -56,6 +56,8 @@
 		
 		<javac debug="true" nowarn="true" deprecation="false" destdir="${buildPath}/bin" fork="yes" source="1.8" target="1.8" srcdir="src/main/java" includeantruntime="false" encoding="UTF-8">
 			<classpath refid="build.classpath" />
+			<compilerarg value="-Xlint:unchecked" />
+			<compilerarg value="-parameters" />
 		</javac>
 
 		<jar destfile="${buildPath}/sshkeyformats-${version}.jar">
@@ -98,6 +100,8 @@
 
 		<javac debug="true" nowarn="true" deprecation="false" destdir="${buildPath}/testbin" fork="yes" source="1.8" target="1.8" srcdir="src/test/java" includeantruntime="false" encoding="UTF-8">
 			<classpath refid="test.build.classpath" />
+			<compilerarg value="-Xlint:unchecked" />
+			<compilerarg value="-parameters" />
 		</javac>
 
 		<copy todir="${buildPath}/testbin">
