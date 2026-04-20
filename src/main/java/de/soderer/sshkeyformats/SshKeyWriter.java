@@ -137,7 +137,7 @@ public class SshKeyWriter {
 					final AlgorithmParameterSpec iv = new IvParameterSpec(derivedKeyBytes, 32, 16);
 
 					final Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
-					cipher.init(Cipher.DECRYPT_MODE, secretKey, iv);
+					cipher.init(Cipher.ENCRYPT_MODE, secretKey, iv);
 
 					privateKeyDataBytesEncrypted = cipher.doFinal(privateKeyData);
 				} finally {
@@ -416,10 +416,6 @@ public class SshKeyWriter {
 
 				if (keyEncryptionCipherName == null || "".equals(keyEncryptionCipherName.trim())) {
 					keyEncryptionCipherName = "AES-128-CBC";
-				}
-
-				if (!"AES-128-CBC".equalsIgnoreCase(keyEncryptionCipherName) && !"DES-EDE3-CBC".equalsIgnoreCase(keyEncryptionCipherName)) {
-					throw new Exception("Unknown key encryption cipher: " + keyEncryptionCipherName);
 				}
 
 				final SecureRandom rnd = new SecureRandom();

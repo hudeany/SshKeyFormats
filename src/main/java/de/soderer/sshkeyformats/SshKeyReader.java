@@ -558,11 +558,7 @@ public class SshKeyReader {
 				final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
 				int nextByte;
 				while ((nextByte = keyDataInput.readByte()) > 0) {
-					if (nextByte == 0) {
-						break;
-					} else {
-						buffer.write(nextByte);
-					}
+					buffer.write(nextByte);
 				}
 				return buffer.toByteArray();
 			} catch (final IOException e) {
@@ -1183,7 +1179,7 @@ public class SshKeyReader {
 				&& Algorithm.NISTP521 != algorithm
 				&& Algorithm.ED25519 != algorithm
 				&& Algorithm.ED448 != algorithm) {
-			throw new Exception("Unsupported chipher: " + algorithm.name());
+			throw new Exception("Unsupported cipher: " + algorithm.name());
 		} else {
 			final Decoder base64Decoder = Base64.getDecoder();
 
