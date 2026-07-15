@@ -152,8 +152,8 @@ public class AuthorizedKeyLineParser {
 				while (currentLineReadIndex < currentLineTextArray.length) {
 					final char nextChar = currentLineTextArray[currentLineReadIndex];
 					currentLineReadIndex++;
-					if (nextChar == '"' && block.charAt(block.length() - 1) != '\\') {
-						if (currentLineTextArray[currentLineReadIndex] == ' ') {
+					if (nextChar == '"' && (block.length() == 0 || block.charAt(block.length() - 1) != '\\')) {
+						if (currentLineReadIndex < currentLineTextArray.length && currentLineTextArray[currentLineReadIndex] == ' ') {
 							currentLineReadIndex++;
 						}
 						return block.toString().replace("\\\"", "\"");
@@ -167,8 +167,8 @@ public class AuthorizedKeyLineParser {
 				while (currentLineReadIndex < currentLineTextArray.length) {
 					final char nextChar = currentLineTextArray[currentLineReadIndex];
 					currentLineReadIndex++;
-					if (nextChar == '\'' && block.charAt(block.length() - 1) != '\\') {
-						if (currentLineTextArray[currentLineReadIndex] == ' ') {
+					if (nextChar == '\'' && (block.length() == 0 || block.charAt(block.length() - 1) != '\\')) {
+						if (currentLineReadIndex < currentLineTextArray.length && currentLineTextArray[currentLineReadIndex] == ' ') {
 							currentLineReadIndex++;
 						}
 						return block.toString().replace("\\'", "'");

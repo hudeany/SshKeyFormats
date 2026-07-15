@@ -441,11 +441,26 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Minimum recommended PBKDF2-HMAC-SHA1 iteration count as of 2024 (OWASP guidance). The previous
+	 * hardcoded value of 1000 iterations was far too weak by modern standards and made brute-forcing
+	 * a derived key significantly easier.
+	 */
+	public static final int DEFAULT_PASSWORD_STRETCH_ITERATIONS = 210_000;
+
 	public static byte[] stretchPassword(final char[] password, final int keyLength, final byte[] salt) {
+		return stretchPassword(password, keyLength, salt, DEFAULT_PASSWORD_STRETCH_ITERATIONS);
+	}
+
+	public static byte[] stretchPassword(final char[] password, final int keyLength, final byte[] salt, final int iterations) {
+		if (iterations <= 0) {
+			throw new IllegalArgumentException("Invalid iterations value: " + iterations);
+		}
+
 		Security.addProvider(new BouncyCastleProvider());
 
 		final PBEParametersGenerator generator = new PKCS5S2ParametersGenerator();
-		generator.init(PBEParametersGenerator.PKCS5PasswordToUTF8Bytes(password), salt, 1000);
+		generator.init(PBEParametersGenerator.PKCS5PasswordToUTF8Bytes(password), salt, iterations);
 		final KeyParameter params = (KeyParameter) generator.generateDerivedParameters(keyLength);
 		return params.getKey();
 	}

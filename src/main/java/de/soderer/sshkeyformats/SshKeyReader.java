@@ -80,6 +80,15 @@ import de.soderer.sshkeyformats.data.WrongPasswordException;
  */
 public class SshKeyReader {
 	/**
+	 * Sanity upper bound for the bcrypt KDF round count of encrypted OpenSSH v1 private keys, to
+	 * protect against maliciously crafted or corrupted key files that could otherwise force a
+	 * practically unbounded CPU-bound loop during key derivation (Denial of Service protection),
+	 * which happens before the password can even be validated. This limit is generous compared to
+	 * any reasonable real-world OpenSSH configuration (ssh-keygen defaults to 16 rounds).
+	 */
+	private static final int MAX_BCRYPT_KDF_ROUNDS = 1_000_000;
+
+	/**
 	 * Read public key data only and ignore the private key parts.<br />
 	 * This may be useful if you only need the public key and don't know the password of the encrypted private key.<br />
 	 * This reads multiple stored public keys, like in authorized keys files.<br />
@@ -512,6 +521,13 @@ public class SshKeyReader {
 	}
 
 	private static class BlockDataReader {
+		/**
+		 * Sanity upper bound for a single length-prefixed data block, to protect against maliciously
+		 * crafted or corrupted key files that could otherwise force a huge memory allocation before
+		 * any validation of the key data has taken place (Denial of Service protection).
+		 */
+		private static final int MAX_BLOCK_SIZE = 16 * 1024 * 1024; // 16 MB
+
 		private final ByteArrayInputStream inputStream;
 		private final DataInput keyDataInput;
 
@@ -541,6 +557,8 @@ public class SshKeyReader {
 				final int nextBlockSize = keyDataInput.readInt();
 				if (nextBlockSize < 0) {
 					throw new Exception("Key blocksize error. Maybe the key encryption password was wrong");
+				} else if (nextBlockSize > MAX_BLOCK_SIZE) {
+					throw new Exception("Key blocksize " + nextBlockSize + " exceeds maximum allowed size of " + MAX_BLOCK_SIZE + " bytes. Maybe the key encryption password was wrong or the key data is corrupted");
 				} else if (nextBlockSize == 0) {
 					return new byte[0];
 				} else {
@@ -803,6 +821,8 @@ public class SshKeyReader {
 					throw new Exception("Invalid key derivation function info 'kdfInitialVectorBytes' for key derivation function '" + kdfName + "'");
 				} else if (kdfRounds <= 0) {
 					throw new Exception("Invalid key derivation function info 'kdfRounds = " + kdfRounds + "' for key derivation function '" + kdfName + "'");
+				} else if (kdfRounds > MAX_BCRYPT_KDF_ROUNDS) {
+					throw new Exception("Key derivation function info 'kdfRounds = " + kdfRounds + "' exceeds maximum allowed value of " + MAX_BCRYPT_KDF_ROUNDS + " for key derivation function '" + kdfName + "'. Maybe the key data is corrupted or malicious");
 				} else {
 					if (password == null || password.getPasswordChars() == null) {
 						throw new WrongPasswordException();
@@ -1114,6 +1134,14 @@ public class SshKeyReader {
 		}
 	}
 
+	/**
+	 * <b>Security note:</b> This implements the legacy OpenSSL "EVP_BytesToKey" key derivation
+	 * (single MD5 round, no configurable work factor), as mandated by the classic "Proc-Type:
+	 * 4,ENCRYPTED" PEM format for backward compatibility. This scheme is inherently weak against
+	 * brute-force attacks by modern standards and has been deprecated by OpenSSL itself in favor of
+	 * encrypted PKCS#8. It cannot be strengthened here without breaking compatibility with existing
+	 * files in this legacy format; prefer PKCS#8 or OpenSSH v1 encrypted key formats where possible.
+	 */
 	private static byte[] stretchPasswordForOpenSsl(final Password password, final byte[] iv, final int usingIvSize, final int keySize, final Charset passwordCharset) throws Exception {
 		final byte[] passwordBytes = StandardCharsets.UTF_8.equals(passwordCharset) ? password.getPasswordBytesUtfEncoded() : password.getPasswordBytesIsoEncoded();
 		final MessageDigest hash = MessageDigest.getInstance("MD5");

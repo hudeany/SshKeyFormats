@@ -128,15 +128,24 @@ public class Asn1Codec {
 
 			int tagLength;
 			final int lengthIndicatingValue = input.read();
-			if (lengthIndicatingValue < 0x80) {
+			if (lengthIndicatingValue < 0) {
+				throw new Exception("Unexpected end of data while reading DER tag length");
+			} else if (lengthIndicatingValue < 0x80) {
 				tagLength = lengthIndicatingValue;
 			} else {
 				final int tagLengthBytesCount = lengthIndicatingValue - 0x80;
 				tagLength = 0;
 				for (int i = 0; i < tagLengthBytesCount; i++) {
 					final int nextValue = input.read();
+					if (nextValue < 0) {
+						throw new Exception("Unexpected end of data while reading DER tag length");
+					}
 					tagLength = (tagLength << 8) + nextValue;
 				}
+			}
+
+			if (tagLength > MAX_DER_TAG_DATA_LENGTH) {
+				throw new Exception("DER tag length " + tagLength + " exceeds maximum allowed size of " + MAX_DER_TAG_DATA_LENGTH + " bytes");
 			}
 
 			// This tagLength might be invalid encoded, because of invalid decryption.
@@ -161,6 +170,13 @@ public class Asn1Codec {
 		}
 	}
 
+	/**
+	 * Sanity upper bound for a single DER tag's data, to protect against maliciously crafted or
+	 * corrupted key data that could otherwise force a huge memory allocation before any validation
+	 * of the data has taken place (Denial of Service protection).
+	 */
+	private static final int MAX_DER_TAG_DATA_LENGTH = 16 * 1024 * 1024; // 16 MB
+
 	public static List<DerTag> readDerTags(final byte[] data) throws Exception {
 		try {
 			final ByteArrayInputStream input = new ByteArrayInputStream(data);
@@ -170,18 +186,37 @@ public class Asn1Codec {
 
 				int tagLength;
 				final int lengthIndicatingValue = input.read();
-				if (lengthIndicatingValue < 0x80) {
+				if (lengthIndicatingValue < 0) {
+					throw new Exception("Unexpected end of data while reading DER tag length");
+				} else if (lengthIndicatingValue < 0x80) {
 					tagLength = lengthIndicatingValue;
 				} else {
 					final int tagLengthBytesCount = lengthIndicatingValue & 0x7F;
 					tagLength = 0;
 					for (int i = 0; i < tagLengthBytesCount; i++) {
-						tagLength = (tagLength << 8) + input.read();
+						final int nextByte = input.read();
+						if (nextByte < 0) {
+							throw new Exception("Unexpected end of data while reading DER tag length");
+						}
+						tagLength = (tagLength << 8) + nextByte;
 					}
 				}
 
+				if (tagLength < 0) {
+					throw new Exception("Invalid negative DER tag length: " + tagLength);
+				} else if (tagLength > MAX_DER_TAG_DATA_LENGTH) {
+					throw new Exception("DER tag length " + tagLength + " exceeds maximum allowed size of " + MAX_DER_TAG_DATA_LENGTH + " bytes");
+				}
+
 				final byte[] dataBlock = new byte[tagLength];
-				input.read(dataBlock);
+				int totalBytesRead = 0;
+				while (totalBytesRead < dataBlock.length) {
+					final int bytesRead = input.read(dataBlock, totalBytesRead, dataBlock.length - totalBytesRead);
+					if (bytesRead < 0) {
+						throw new Exception("Unexpected end of data while reading DER tag data of length " + tagLength);
+					}
+					totalBytesRead += bytesRead;
+				}
 
 				returnList.add(new DerTag(tagId, dataBlock));
 			}

@@ -498,6 +498,14 @@ public class SshKeyWriter {
 		return headerBuilder.toString();
 	}
 
+	/**
+	 * <b>Security note:</b> This implements the legacy OpenSSL "EVP_BytesToKey" key derivation
+	 * (single MD5 round, no configurable work factor), as mandated by the classic "Proc-Type:
+	 * 4,ENCRYPTED" PEM format for backward compatibility. This scheme is inherently weak against
+	 * brute-force attacks by modern standards and has been deprecated by OpenSSL itself in favor of
+	 * encrypted PKCS#8. It cannot be strengthened here without breaking compatibility with this
+	 * legacy format; prefer PKCS#8 or OpenSSH v1 encrypted key formats where possible.
+	 */
 	private static byte[] stretchPasswordForOpenSsl(final byte[] passwordBytes, final byte[] iv, final int usingIvSize, final int keySize) throws Exception {
 		final MessageDigest hash = MessageDigest.getInstance("MD5");
 		final byte[] key = new byte[keySize];
