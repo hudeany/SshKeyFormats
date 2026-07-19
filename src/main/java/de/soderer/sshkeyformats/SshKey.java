@@ -87,12 +87,22 @@ public class SshKey {
 		this.format = format == null ? SshKeyFormat.Undefined : format;
 	}
 
+	public SshKey withFormat(final SshKeyFormat newFormat) {
+		setFormat(newFormat);
+		return this;
+	}
+
 	public String getComment() {
 		return comment;
 	}
 
 	public void setComment(final String comment) {
 		this.comment = comment;
+	}
+
+	public SshKey withComment(final String newComment) {
+		setComment(newComment);
+		return this;
 	}
 
 	public String getMd5Fingerprint() throws Exception {

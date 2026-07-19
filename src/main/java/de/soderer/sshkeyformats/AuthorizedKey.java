@@ -62,8 +62,12 @@ public class AuthorizedKey extends SshKey {
 	 * @param environment
 	 * @return
 	 */
-	public AuthorizedKey setEnvironment(final Map<String, String> environment) {
+	public void setEnvironment(final Map<String, String> environment) {
 		this.environment = environment;
+	}
+
+	public AuthorizedKey withEnvironment(final Map<String, String> newEnvironment) {
+		setEnvironment(newEnvironment);
 		return this;
 	}
 
@@ -75,8 +79,12 @@ public class AuthorizedKey extends SshKey {
 	 * @param environmentValue
 	 * @return
 	 */
-	public AuthorizedKey setEnvironmentValue(final String environmentKeyName, final String environmentValue) {
+	public void setEnvironmentValue(final String environmentKeyName, final String environmentValue) {
 		environment.put(environmentKeyName, environmentValue);
+	}
+
+	public AuthorizedKey withEnvironmentValue(final String newEnvironmentKeyName, final String newEnvironmentValue) {
+		setEnvironmentValue(newEnvironmentKeyName, newEnvironmentValue);
 		return this;
 	}
 
@@ -118,12 +126,22 @@ public class AuthorizedKey extends SshKey {
 		this.command = command;
 	}
 
+	public AuthorizedKey withCommand(final String newCommand) {
+		setCommand(newCommand);
+		return this;
+	}
+
 	public boolean isCertAuthority() {
 		return certAuthority;
 	}
 
 	public void setCertAuthority(final boolean certAuthority) {
 		this.certAuthority = certAuthority;
+	}
+
+	public AuthorizedKey withCertAuthority(final boolean newCertAuthority) {
+		setCertAuthority(newCertAuthority);
+		return this;
 	}
 
 	public String getFromList() {
@@ -134,12 +152,22 @@ public class AuthorizedKey extends SshKey {
 		this.fromList = fromList;
 	}
 
+	public AuthorizedKey withFromList(final String newFromList) {
+		setFromList(newFromList);
+		return this;
+	}
+
 	public boolean isNoAgentForwarding() {
 		return noAgentForwarding;
 	}
 
 	public void setNoAgentForwarding(final boolean noAgentForwarding) {
 		this.noAgentForwarding = noAgentForwarding;
+	}
+
+	public AuthorizedKey withNoAgentForwarding(final boolean newNoAgentForwarding) {
+		setNoAgentForwarding(newNoAgentForwarding);
+		return this;
 	}
 
 	public boolean isNoPortForwarding() {
@@ -150,12 +178,22 @@ public class AuthorizedKey extends SshKey {
 		this.noPortForwarding = noPortForwarding;
 	}
 
+	public AuthorizedKey withNoPortForwarding(final boolean newNoPortForwarding) {
+		setNoPortForwarding(newNoPortForwarding);
+		return this;
+	}
+
 	public boolean isNoPty() {
 		return noPty;
 	}
 
 	public void setNoPty(final boolean noPty) {
 		this.noPty = noPty;
+	}
+
+	public AuthorizedKey withNoPty(final boolean newNoPty) {
+		setNoPty(newNoPty);
+		return this;
 	}
 
 	public boolean isNoUserRc() {
@@ -166,12 +204,22 @@ public class AuthorizedKey extends SshKey {
 		this.noUserRc = noUserRc;
 	}
 
+	public AuthorizedKey withNoUserRc(final boolean newNoUserRc) {
+		setNoUserRc(newNoUserRc);
+		return this;
+	}
+
 	public boolean isNoX11Forwarding() {
 		return noX11Forwarding;
 	}
 
 	public void setNoX11Forwarding(final boolean noX11Forwarding) {
 		this.noX11Forwarding = noX11Forwarding;
+	}
+
+	public AuthorizedKey withNoX11Forwarding(final boolean newNoX11Forwarding) {
+		setNoX11Forwarding(newNoX11Forwarding);
+		return this;
 	}
 
 	public String getPermitOpen() {
@@ -182,6 +230,11 @@ public class AuthorizedKey extends SshKey {
 		this.permitOpen = permitOpen;
 	}
 
+	public AuthorizedKey withPermitOpen(final String newPermitOpen) {
+		setPermitOpen(newPermitOpen);
+		return this;
+	}
+
 	public String getPrincipals() {
 		return principals;
 	}
@@ -190,11 +243,21 @@ public class AuthorizedKey extends SshKey {
 		this.principals = principals;
 	}
 
+	public AuthorizedKey withPrincipals(final String newPrincipals) {
+		setPrincipals(newPrincipals);
+		return this;
+	}
+
 	public String getTunnel() {
 		return tunnel;
 	}
 
 	public void setTunnel(final String tunnel) {
 		this.tunnel = tunnel;
+	}
+
+	public AuthorizedKey withTunnel(final String newTunnel) {
+		setTunnel(newTunnel);
+		return this;
 	}
 }
