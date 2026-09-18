@@ -72,7 +72,7 @@
 		<checksum file="${buildPath}/sshkeyformats-${version}.jar" fileext=".md5" forceOverwrite="yes" />
 		<checksum file="${buildPath}/sshkeyformats-${version}.jar" algorithm="SHA-1" fileext=".sha1" forceOverwrite="yes" />
 
-		<jar destfile="${buildPath}/sshkeyformats-${version}_sources.jar">
+		<jar destfile="${buildPath}/sshkeyformats-${version}-sources.jar">
 			<manifest>
 				<attribute name="Version" value="${version}" />
 			</manifest>
@@ -81,8 +81,8 @@
 
 			<fileset dir="" includes="LICENSE.txt"/>
 		</jar>
-		<checksum file="${buildPath}/sshkeyformats-${version}_sources.jar" fileext=".md5" forceOverwrite="yes"/>
-		<checksum file="${buildPath}/sshkeyformats-${version}_sources.jar" algorithm="SHA-1" fileext=".sha1" forceOverwrite="yes" />
+		<checksum file="${buildPath}/sshkeyformats-${version}-sources.jar" fileext=".md5" forceOverwrite="yes"/>
+		<checksum file="${buildPath}/sshkeyformats-${version}-sources.jar" algorithm="SHA-1" fileext=".sha1" forceOverwrite="yes" />
 	</target>
 
 	<target name="test" depends="create_jar">
