@@ -1,17 +1,73 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<project default="build_jar" name="Create all Jars for Project SshKeyFormats">
-	<loadfile property="version" srcFile="build.version" failonerror="false" />
-	<property name="version" value="noVersion" />
-	
+<project default="build_jar" name="Build library SshKeyFormats">
+	<!-- ===== Project specific part ===== -->
+
+	<!-- Artifact name used for the jar file names and the Maven artifactId -->
+	<property name="artifactId" value="sshkeyformats" />
+
+	<!-- Bouncy Castle version -->
 	<property name="bouncycastle.version" value="1.86" />
 
-	<property name="projectsPath" value="${user.home}/git" />
-	<echo message="projectsPath: ${projectsPath}" />
+	<!-- Runtime libraries of this project go to "lib/" (may stay empty) -->
+	<target name="download_dependencies">
+		<mkdir dir="lib/" />
+		<delete includeEmptyDirs="true">
+			<fileset dir="lib/">
+				<include name="*" />
+			</fileset>
+		</delete>
+
+		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcpkix-jdk18on/${bouncycastle.version}/bcpkix-jdk18on-${bouncycastle.version}.jar" dest="lib/" />
+		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk18on/${bouncycastle.version}/bcprov-jdk18on-${bouncycastle.version}.jar" dest="lib/" />
+	</target>
+
+	<!-- ===== Common part: identical in all library build files, do not change per project ===== -->
+
+	<echo message="Java Version: ${java.version}" />
+	<echo message="Ant Version: ${ant.version}" />
+
+	<!-- Strip line breaks so a trailing newline in build.version does not end up in file names -->
+	<loadfile property="version" srcFile="build.version" failonerror="false">
+		<filterchain>
+			<striplinebreaks />
+		</filterchain>
+	</loadfile>
+	<property name="version" value="noVersion" />
+
+	<echo message="artifactId: ${artifactId}" />
+	<echo message="version (build.version): ${version}" />
 
 	<property name="buildPath" value="build" />
 	<echo message="buildPath: ${buildPath}" />
 
-	<target name="build_jar" depends="cleanup_before, create_jar, test, cleanup_after" />
+	<!-- Runtime libraries; an empty or missing "lib/" directory is fine -->
+	<path id="runtime.libs">
+		<fileset dir="lib" erroronmissingdir="false">
+			<include name="*.jar" />
+		</fileset>
+	</path>
+
+	<!-- Test libraries, same for all libraries -->
+	<target name="download_test_dependencies">
+		<mkdir dir="lib_test/" />
+		<delete includeEmptyDirs="true">
+			<fileset dir="lib_test/">
+				<include name="*" />
+			</fileset>
+		</delete>
+
+		<get src="https://repo1.maven.org/maven2/org/hamcrest/hamcrest/3.0/hamcrest-3.0.jar" dest="lib_test/" />
+		<get src="https://repo1.maven.org/maven2/org/junit/jupiter/junit-jupiter-api/6.0.3/junit-jupiter-api-6.0.3.jar" dest="lib_test/" />
+		<get src="https://repo1.maven.org/maven2/org/junit/jupiter/junit-jupiter-engine/6.0.3/junit-jupiter-engine-6.0.3.jar" dest="lib_test/" />
+		<get src="https://repo1.maven.org/maven2/org/junit/jupiter/junit-jupiter-params/6.0.3/junit-jupiter-params-6.0.3.jar" dest="lib_test/" />
+		<get src="https://repo1.maven.org/maven2/org/junit/platform/junit-platform-launcher/6.0.3/junit-platform-launcher-6.0.3.jar" dest="lib_test/" />
+		<get src="https://repo1.maven.org/maven2/org/junit/platform/junit-platform-engine/6.0.3/junit-platform-engine-6.0.3.jar" dest="lib_test/" />
+		<get src="https://repo1.maven.org/maven2/org/junit/platform/junit-platform-commons/6.0.3/junit-platform-commons-6.0.3.jar" dest="lib_test/" />
+		<get src="https://repo1.maven.org/maven2/org/opentest4j/opentest4j/1.3.0/opentest4j-1.3.0.jar" dest="lib_test/" />
+		<get src="https://repo1.maven.org/maven2/org/apiguardian/apiguardian-api/1.1.2/apiguardian-api-1.1.2.jar" dest="lib_test/" />
+	</target>
+
+	<target name="build_jar" depends="cleanup_before, create_jar, test, create_javadoc, cleanup_after" />
 
 	<target name="cleanup_before">
 		<mkdir dir="${buildPath}" />
@@ -22,121 +78,109 @@
 			</fileset>
 		</delete>
 
+		<delete dir="${buildPath}/bin" />
 		<mkdir dir="${buildPath}/bin" />
+
+		<delete dir="${buildPath}/testbin" />
 		<mkdir dir="${buildPath}/testbin" />
-	</target>
-	
-	<target name="download_dependencies">
-		<mkdir dir="lib" />
-		<delete includeEmptyDirs="true">
-			<fileset dir="lib">
-				<include name="*" />
-			</fileset>
-		</delete>
-
-		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcpkix-jdk18on/${bouncycastle.version}/bcpkix-jdk18on-${bouncycastle.version}.jar" dest="lib/" />
-		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk18on/${bouncycastle.version}/bcprov-jdk18on-${bouncycastle.version}.jar" dest="lib/" />
-
-		<mkdir dir="lib_test/" />
-		<delete includeEmptyDirs="true">
-			<fileset dir="lib_test/">
-				<include name="*" />
-			</fileset>
-		</delete>
-		
-		<get src="https://repo1.maven.org/maven2/org/hamcrest/hamcrest/2.2/hamcrest-2.2.jar" dest="lib_test/" />
-		<get src="https://repo1.maven.org/maven2/org/hamcrest/hamcrest-core/2.2/hamcrest-core-2.2.jar" dest="lib_test/" />
-		<get src="https://repo1.maven.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar" dest="lib_test/" />
 	</target>
 
 	<target name="create_jar" depends="cleanup_before, download_dependencies">
-		<path id="build.classpath">
-			<fileset dir="lib">
-				<include name="*.jar" />
-			</fileset>
-		</path>
-		
-		<javac release="17" debug="true" nowarn="true" deprecation="false" destdir="${buildPath}/bin" fork="yes" srcdir="src/main/java" includeantruntime="false" encoding="UTF-8">
-			<classpath refid="build.classpath" />
+		<javac release="17" srcdir="src/main/java" destdir="${buildPath}/bin" includeantruntime="false" encoding="UTF-8" debug="true" deprecation="false" nowarn="true">
+			<classpath refid="runtime.libs" />
 			<compilerarg value="-Xlint:unchecked" />
 			<compilerarg value="-parameters" />
 		</javac>
 
-		<jar destfile="${buildPath}/sshkeyformats-${version}.jar">
+		<copy todir="${buildPath}/bin">
+			<fileset dir="src/main/resources" erroronmissingdir="false" />
+		</copy>
+
+		<jar destfile="${buildPath}/${artifactId}-${version}.jar">
 			<manifest>
 				<attribute name="Version" value="${version}" />
 			</manifest>
 
 			<fileset dir="${buildPath}/bin" />
-
-			<fileset dir="" includes="LICENSE.txt"/>
+			<fileset dir="" includes="LICENSE.txt" />
 		</jar>
-		<checksum file="${buildPath}/sshkeyformats-${version}.jar" fileext=".md5" forceOverwrite="yes" />
-		<checksum file="${buildPath}/sshkeyformats-${version}.jar" algorithm="SHA-1" fileext=".sha1" forceOverwrite="yes" />
 
-		<jar destfile="${buildPath}/sshkeyformats-${version}-sources.jar">
+		<jar destfile="${buildPath}/${artifactId}-${version}-sources.jar">
 			<manifest>
 				<attribute name="Version" value="${version}" />
 			</manifest>
 
-			<fileset dir="src/main/java" includes="**/*.java"/>
-
-			<fileset dir="" includes="LICENSE.txt"/>
+			<fileset dir="src/main/java" includes="**/*.java" />
+			<fileset dir="" includes="LICENSE.txt" />
 		</jar>
-		<checksum file="${buildPath}/sshkeyformats-${version}-sources.jar" fileext=".md5" forceOverwrite="yes"/>
-		<checksum file="${buildPath}/sshkeyformats-${version}-sources.jar" algorithm="SHA-1" fileext=".sha1" forceOverwrite="yes" />
 	</target>
 
-	<target name="test" depends="create_jar">
-		<path id="test.build.classpath">
-			<fileset dir="lib_test">
-				<include name="*.jar" />
-			</fileset>
-			<fileset dir="${buildPath}">
-				<include name="*.jar" />
-			</fileset>
-			<fileset dir="lib">
-				<include name="*.jar" />
-			</fileset>
-		</path>
-
-		<javac release="17" debug="true" nowarn="true" deprecation="false" destdir="${buildPath}/testbin" fork="yes" srcdir="src/test/java" includeantruntime="false" encoding="UTF-8">
-			<classpath refid="test.build.classpath" />
-			<compilerarg value="-Xlint:unchecked" />
-			<compilerarg value="-parameters" />
-		</javac>
-
-		<copy todir="${buildPath}/testbin">
-			<fileset dir="src/test/resources" />
-		</copy>
-
+	<target name="test" depends="create_jar, download_test_dependencies">
 		<path id="test.classpath">
 			<fileset dir="lib_test">
 				<include name="*.jar" />
 			</fileset>
-			<fileset dir="${buildPath}">
-				<include name="*.jar" />
-			</fileset>
-			<dirset dir="${buildPath}">
-				<include name="testbin" />
-			</dirset>
-			<fileset dir="lib">
-				<include name="*.jar" />
-			</fileset>
+			<path refid="runtime.libs" />
+			<pathelement location="${buildPath}/${artifactId}-${version}.jar" />
+			<pathelement location="${buildPath}/testbin" />
 		</path>
 
-		<junit printsummary="yes" haltonfailure="yes">
+		<javac release="17" srcdir="src/test/java" destdir="${buildPath}/testbin" includeantruntime="false" encoding="UTF-8" debug="true" failonerror="true">
 			<classpath refid="test.classpath" />
-			<batchtest todir="build">
-				<formatter type="plain" usefile="true"/>
-				<fileset dir="src/test/java">
-					<include name="**/*Test.java" />
+			<include name="**/*.java" />
+		</javac>
+
+		<copy todir="${buildPath}/testbin">
+			<fileset dir="src/test/resources" erroronmissingdir="false" />
+		</copy>
+
+		<junitlauncher printSummary="true" failureProperty="test.failed">
+			<classpath refid="test.classpath" />
+			<testclasses outputdir="${buildPath}">
+				<fileset dir="${buildPath}/testbin">
+					<include name="**/*.class" />
 				</fileset>
-			</batchtest>
-		</junit>
+				<!-- Writes a report per test class to TEST-*.txt, including details of failed tests -->
+				<listener type="legacy-brief" sendSysOut="false" sendSysErr="false" />
+			</testclasses>
+		</junitlauncher>
+
+		<!-- Show which tests failed and why before stopping the build (only reports with failures or errors) -->
+		<concat if:set="test.failed" xmlns:if="ant:if">
+			<fileset dir="${buildPath}" includes="TEST-*.txt">
+				<or>
+					<contains text="FAILED" />
+					<contains text="Caused an ERROR" />
+				</or>
+			</fileset>
+		</concat>
+		<fail if="test.failed" message="Tests failed!" />
 	</target>
 
-	<target name="cleanup_after" depends="create_jar, test">
+	<target name="create_javadoc" depends="create_jar">
+		<delete dir="${buildPath}/javadoc" />
+		<mkdir dir="${buildPath}/javadoc" />
+
+		<!-- doclint disabled so missing javadoc comments do not break the build -->
+		<javadoc destdir="${buildPath}/javadoc" encoding="UTF-8" charset="UTF-8" docencoding="UTF-8" source="17" failonerror="true">
+			<classpath refid="runtime.libs" />
+			<arg value="-quiet" />
+			<fileset dir="src/main/java" includes="**/*.java" />
+		</javadoc>
+
+		<jar destfile="${buildPath}/${artifactId}-${version}-javadoc.jar">
+			<manifest>
+				<attribute name="Version" value="${version}" />
+			</manifest>
+
+			<fileset dir="${buildPath}/javadoc" />
+			<fileset dir="" includes="LICENSE.txt" />
+		</jar>
+
+		<delete dir="${buildPath}/javadoc" />
+	</target>
+
+	<target name="cleanup_after" depends="test, create_javadoc">
 		<delete dir="${buildPath}/bin" />
 		<delete dir="${buildPath}/testbin" />
 

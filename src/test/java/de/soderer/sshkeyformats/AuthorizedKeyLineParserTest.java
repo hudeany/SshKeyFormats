@@ -1,7 +1,8 @@
 package de.soderer.sshkeyformats;
 
-import org.junit.Assert;
-import org.junit.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import org.junit.jupiter.api.Test;
 
 import de.soderer.sshkeyformats.data.Algorithm;
 import de.soderer.sshkeyformats.data.AuthorizedKeyLineParser;
@@ -29,52 +30,52 @@ public class AuthorizedKeyLineParserTest {
 		final AuthorizedKey key6 = new AuthorizedKeyLineParser().parseAuthorizedKeyLine(testContent[5]);
 		final AuthorizedKey key7 = new AuthorizedKeyLineParser().parseAuthorizedKeyLine(testContent[6]);
 
-		Assert.assertEquals(1, key1.getEnvironment().size());
-		Assert.assertEquals("value", key1.getEnvironment().get("NAME"));
-		Assert.assertEquals(Algorithm.ED25519, key1.getKeyType());
-		Assert.assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key1.getKeyString());
-		Assert.assertEquals(null, key1.getComment());
+		assertEquals(1, key1.getEnvironment().size());
+		assertEquals("value", key1.getEnvironment().get("NAME"));
+		assertEquals(Algorithm.ED25519, key1.getKeyType());
+		assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key1.getKeyString());
+		assertEquals(null, key1.getComment());
 
-		Assert.assertEquals(null, key2.getEnvironment());
-		Assert.assertEquals(Algorithm.ED25519, key2.getKeyType());
-		Assert.assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIOvbS7rC4qN+z/DnBoUDCQDi6OEyV3sGyqKPeEOsuxvN", key2.getKeyString());
-		Assert.assertEquals(null, key2.getComment());
+		assertEquals(null, key2.getEnvironment());
+		assertEquals(Algorithm.ED25519, key2.getKeyType());
+		assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIOvbS7rC4qN+z/DnBoUDCQDi6OEyV3sGyqKPeEOsuxvN", key2.getKeyString());
+		assertEquals(null, key2.getComment());
 
-		Assert.assertEquals(2, key3.getEnvironment().size());
-		Assert.assertEquals("my value", key3.getEnvironment().get("NAME"));
-		Assert.assertEquals("key value", key3.getEnvironment().get("KEY"));
-		Assert.assertEquals(Algorithm.ED25519, key3.getKeyType());
-		Assert.assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key3.getKeyString());
-		Assert.assertEquals(null, key3.getComment());
+		assertEquals(2, key3.getEnvironment().size());
+		assertEquals("my value", key3.getEnvironment().get("NAME"));
+		assertEquals("key value", key3.getEnvironment().get("KEY"));
+		assertEquals(Algorithm.ED25519, key3.getKeyType());
+		assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key3.getKeyString());
+		assertEquals(null, key3.getComment());
 
-		Assert.assertEquals(1, key4.getEnvironment().size());
-		Assert.assertEquals("my value", key4.getEnvironment().get("NAME"));
-		Assert.assertEquals(Algorithm.RSA, key4.getKeyType());
-		Assert.assertEquals("AAAAB3NzaC1yc2EAAAADAQABAAAAgQCNaf7jmjy/WzwTjc5eseYVNK/tQIBIyIUt5RC64HU6gKgAn2mv538Yf0sMR7cq4qQzhosGD4xOJUh1LmQnHwJ4pWC9lhh3FwKk2kLDnOqULTOMUhnWSHKw/tweJsy81+mXettuyt102cQuqF9vIexmLwTv+bMvtM3bmTSYAuk9iw==", key4.getKeyString());
-		Assert.assertEquals("my comment", key4.getComment());
+		assertEquals(1, key4.getEnvironment().size());
+		assertEquals("my value", key4.getEnvironment().get("NAME"));
+		assertEquals(Algorithm.RSA, key4.getKeyType());
+		assertEquals("AAAAB3NzaC1yc2EAAAADAQABAAAAgQCNaf7jmjy/WzwTjc5eseYVNK/tQIBIyIUt5RC64HU6gKgAn2mv538Yf0sMR7cq4qQzhosGD4xOJUh1LmQnHwJ4pWC9lhh3FwKk2kLDnOqULTOMUhnWSHKw/tweJsy81+mXettuyt102cQuqF9vIexmLwTv+bMvtM3bmTSYAuk9iw==", key4.getKeyString());
+		assertEquals("my comment", key4.getComment());
 
-		Assert.assertEquals(null, key5.getEnvironment());
-		Assert.assertEquals(Algorithm.ED25519, key5.getKeyType());
-		Assert.assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key5.getKeyString());
-		Assert.assertEquals("my comment", key5.getComment());
+		assertEquals(null, key5.getEnvironment());
+		assertEquals(Algorithm.ED25519, key5.getKeyType());
+		assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key5.getKeyString());
+		assertEquals("my comment", key5.getComment());
 
-		Assert.assertEquals(null, key6.getEnvironment());
-		Assert.assertEquals(Algorithm.ED25519, key6.getKeyType());
-		Assert.assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key6.getKeyString());
-		Assert.assertEquals(null, key6.getComment());
+		assertEquals(null, key6.getEnvironment());
+		assertEquals(Algorithm.ED25519, key6.getKeyType());
+		assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key6.getKeyString());
+		assertEquals(null, key6.getComment());
 
-		Assert.assertEquals(1, key7.getEnvironment().size());
-		Assert.assertEquals("my value", key7.getEnvironment().get("NAME"));
-		Assert.assertEquals(Algorithm.ED25519, key7.getKeyType());
-		Assert.assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key7.getKeyString());
-		Assert.assertEquals(null, key7.getComment());
+		assertEquals(1, key7.getEnvironment().size());
+		assertEquals("my value", key7.getEnvironment().get("NAME"));
+		assertEquals(Algorithm.ED25519, key7.getKeyType());
+		assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key7.getKeyString());
+		assertEquals(null, key7.getComment());
 
 		final AuthorizedKey key8 = new AuthorizedKeyLineParser().parseAuthorizedKeyLine(testContent[7]);
-		Assert.assertEquals(null, key8.getEnvironment());
-		Assert.assertEquals(Algorithm.ED25519, key8.getKeyType());
-		Assert.assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key8.getKeyString());
-		Assert.assertEquals(null, key8.getComment());
-		Assert.assertEquals("DDF0BB6EB54E22BB80C0F256C76D5ADF", key8.getHash());
+		assertEquals(null, key8.getEnvironment());
+		assertEquals(Algorithm.ED25519, key8.getKeyType());
+		assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key8.getKeyString());
+		assertEquals(null, key8.getComment());
+		assertEquals("DDF0BB6EB54E22BB80C0F256C76D5ADF", key8.getHash());
 	}
 
 	@Test
@@ -84,7 +85,7 @@ public class AuthorizedKeyLineParserTest {
 						+ "no-x11-forwarding permitopen=\"allowed to open\" principals=\"pricipal\" tunnel=\"host:port\" "
 						+ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX My comment"
 				);
-		Assert.assertEquals(Algorithm.ED25519, key.getKeyType());
-		Assert.assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key.getKeyString());
+		assertEquals(Algorithm.ED25519, key.getKeyType());
+		assertEquals("AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX", key.getKeyString());
 	}
 }
