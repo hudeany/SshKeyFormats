@@ -2,6 +2,8 @@
 <project default="build_jar" name="Create all Jars for Project SshKeyFormats">
 	<loadfile property="version" srcFile="build.version" failonerror="false" />
 	<property name="version" value="noVersion" />
+	
+	<property name="bouncycastle.version" value="1.86" />
 
 	<property name="projectsPath" value="${user.home}/git" />
 	<echo message="projectsPath: ${projectsPath}" />
@@ -31,10 +33,10 @@
 				<include name="*" />
 			</fileset>
 		</delete>
-	
-		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk18on/1.80/bcprov-jdk18on-1.80.jar" dest="lib/" />
-		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcpkix-jdk18on/1.80/bcpkix-jdk18on-1.80.jar" dest="lib/" />
-		
+
+		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcpkix-jdk18on/${bouncycastle.version}/bcpkix-jdk18on-${bouncycastle.version}.jar" dest="lib/" />
+		<get src="https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk18on/${bouncycastle.version}/bcprov-jdk18on-${bouncycastle.version}.jar" dest="lib/" />
+
 		<mkdir dir="lib_test/" />
 		<delete includeEmptyDirs="true">
 			<fileset dir="lib_test/">

@@ -400,11 +400,11 @@ public class CryptographicUtilities {
 		try (PEMParser pemReader = new PEMParser(new StringReader(keyString))) {
 			final Object readObject = pemReader.readObject();
 			pemReader.close();
-			//			if (readObject instanceof PEMEncryptedKeyPair) {
-			//                PEMEncryptedKeyPair pemEncryptedKeyPairKeyPair = (PEMEncryptedKeyPair) readObject;
-			//                JcePEMDecryptorProviderBuilder jcePEMDecryptorProviderBuilder = new JcePEMDecryptorProviderBuilder();
-			//                PEMKeyPair pemKeyPair = pemEncryptedKeyPairKeyPair.decryptKeyPair(jcePEMDecryptorProviderBuilder.build(keyPassword.toCharArray()));
-			//            } else
+			// if (readObject instanceof PEMEncryptedKeyPair) {
+			//   PEMEncryptedKeyPair pemEncryptedKeyPairKeyPair = (PEMEncryptedKeyPair) readObject;
+			//   JcePEMDecryptorProviderBuilder jcePEMDecryptorProviderBuilder = new JcePEMDecryptorProviderBuilder();
+			//   PEMKeyPair pemKeyPair = pemEncryptedKeyPairKeyPair.decryptKeyPair(jcePEMDecryptorProviderBuilder.build(keyPassword.toCharArray()));
+			// } else
 			if (readObject instanceof PEMKeyPair) {
 				final PEMKeyPair keyPair = (PEMKeyPair) readObject;
 				return keyPair;
@@ -1175,10 +1175,11 @@ public class CryptographicUtilities {
 	}
 
 	public static final String getEllipticCurveName(final ECParameterSpec ecParameterSpec) throws Exception{
-		final Enumeration<String> curveNamesEnumeration = org.bouncycastle.asn1.x9.ECNamedCurveTable.getNames();
-
-		for (final String name : Collections.list(curveNamesEnumeration)) {
+		final Enumeration<?> curveNamesEnumeration = org.bouncycastle.asn1.x9.ECNamedCurveTable.getNames();
+		while (curveNamesEnumeration.hasMoreElements()) {
+			final String name = (String) curveNamesEnumeration.nextElement();
 			final X9ECParameters params = org.bouncycastle.asn1.x9.ECNamedCurveTable.getByName(name);
+
 			if (params.getN().equals(ecParameterSpec.getN())
 					&& params.getH().equals(ecParameterSpec.getH())
 					&& params.getCurve().equals(ecParameterSpec.getCurve())
