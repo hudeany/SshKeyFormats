@@ -1,5 +1,8 @@
 package de.soderer.sshkeyformats.data;
 
+/**
+ * Defines the supported algorithm values.
+ */
 public enum Algorithm {
 	DSA("ssh-dss"),
 	RSA("ssh-rsa"),
@@ -15,10 +18,20 @@ public enum Algorithm {
 		this.sshAlgorithmId = sshAlgorithmId;
 	}
 
+	/**
+	 * Returns the ssh algorithm id.
+	 * @return the resulting value
+	 */
 	public String getSshAlgorithmId() {
 		return sshAlgorithmId;
 	}
 
+	/**
+	 * Returns the for ssh algorithm id.
+	 * @param text the text
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static Algorithm getForSshAlgorithmId(final String text) throws Exception {
 		for (final Algorithm type : Algorithm.values()) {
 			if (type.getSshAlgorithmId().equalsIgnoreCase(text)) {

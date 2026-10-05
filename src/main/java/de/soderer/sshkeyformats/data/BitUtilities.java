@@ -6,6 +6,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Pattern;
 
+/**
+ * Provides functionality for bit utilities.
+ */
 public class BitUtilities {
 	private static Pattern BITSTRINGPATTERN_BYTE = Pattern.compile("^[10]{1,8}$");
 	private static Pattern BITSTRINGPATTERN_INTEGER = Pattern.compile("^[10]{1,32}$");
@@ -15,7 +18,7 @@ public class BitUtilities {
 	 * Returns values from 0 to 255 (value range of byte)
 	 *
 	 * @param value
-	 * @return
+	 * @return the unsigned integer value
 	 */
 	public static int getUnsignedValue(final byte value) {
 		if (value < 0) {
@@ -29,7 +32,7 @@ public class BitUtilities {
 	 * Returns values from 0 to 255 (value range of byte)
 	 *
 	 * @param value
-	 * @return
+	 * @return an array containing the unsigned values
 	 */
 	public static int[] getUnsignedValue(final byte[] value) {
 		final int[] returnValue = new int[value.length];
@@ -43,7 +46,7 @@ public class BitUtilities {
 	 * Returns the value as a Byte which contains only signed values in Java
 	 *
 	 * @param value
-	 * @return
+	 * @return the value represented as an unsigned byte
 	 * @throws Exception
 	 */
 	public static byte getUnsignedAsByte(final int value) throws Exception {
@@ -56,6 +59,11 @@ public class BitUtilities {
 		}
 	}
 
+	/**
+	 * Returns the bit string.
+	 * @param byteItem the byte item
+	 * @return the resulting value
+	 */
 	public static String getBitString(final byte byteItem) {
 		final StringBuilder result = new StringBuilder();
 		for (int i = 7; i >= 0; i--) {
@@ -64,6 +72,11 @@ public class BitUtilities {
 		return result.toString();
 	}
 
+	/**
+	 * Returns the bit string.
+	 * @param intItem the int item
+	 * @return the resulting value
+	 */
 	public static String getBitString(final int intItem) {
 		final StringBuilder result = new StringBuilder();
 		for (int i = 31; i >= 0; i--) {
@@ -72,10 +85,21 @@ public class BitUtilities {
 		return result.toString();
 	}
 
+	/**
+	 * Returns the bit string.
+	 * @param byteArray the byte array
+	 * @return the resulting value
+	 */
 	public static String getBitString(final byte[] byteArray) {
 		return getBitString(byteArray, " ");
 	}
 
+	/**
+	 * Returns the bit string.
+	 * @param byteArray the byte array
+	 * @param byteSeparator the byte separator
+	 * @return the resulting value
+	 */
 	public static String getBitString(final byte[] byteArray, final String byteSeparator) {
 		final StringBuilder result = new StringBuilder();
 		for (final byte byteItem : byteArray) {
@@ -90,6 +114,12 @@ public class BitUtilities {
 		return result.toString();
 	}
 
+	/**
+	 * Returns the byte from bit string.
+	 * @param bitString the bit string
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static byte getByteFromBitString(String bitString) throws Exception {
 		if (isEmpty(bitString)) {
 			throw new Exception("Invalid bitstring for byte");
@@ -113,6 +143,12 @@ public class BitUtilities {
 		return result;
 	}
 
+	/**
+	 * Returns the integer from bit string.
+	 * @param bitString the bit string
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static int getIntegerFromBitString(String bitString) throws Exception {
 		if (isEmpty(bitString)) {
 			throw new Exception("Invalid bitstring for integer");
@@ -136,6 +172,11 @@ public class BitUtilities {
 		return result;
 	}
 
+	/**
+	 * Creates a value from  hex string.
+	 * @param value the value
+	 * @return the resulting value
+	 */
 	public static byte[] fromHexString(final String value) {
 		if (value == null) {
 			return null;
@@ -156,6 +197,12 @@ public class BitUtilities {
 		}
 	}
 
+	/**
+	 * Creates a value from  hex string.
+	 * @param value the value
+	 * @param ignoreNonHexCharacters the ignore non hex characters
+	 * @return the resulting value
+	 */
 	public static byte[] fromHexString(final String value, final boolean ignoreNonHexCharacters) {
 		if (value == null) {
 			return null;
@@ -199,6 +246,15 @@ public class BitUtilities {
 		return returnString.toString().toLowerCase();
 	}
 
+	/**
+	 * Returns the hex string.
+	 * @param data the data
+	 * @param separator the separator
+	 * @param bytesBeforeLinebreak the bytes before linebreak
+	 * @param insertHexLineNumber the insert hex line number
+	 * @param insertAsciiText the insert ascii text
+	 * @return the resulting value
+	 */
 	public static String getHexString(final byte[] data, final String separator, final int bytesBeforeLinebreak, final boolean insertHexLineNumber, final boolean insertAsciiText) {
 		final StringBuilder returnString = new StringBuilder();
 		int byteCount = 0;
@@ -244,6 +300,11 @@ public class BitUtilities {
 		}
 	}
 
+	/**
+	 * Returns the byte array from hex string.
+	 * @param value the value
+	 * @return the resulting value
+	 */
 	public static byte[] getByteArrayFromHexString(final String value) {
 		final int length = value.length();
 		final byte[] data = new byte[length / 2];
@@ -281,6 +342,11 @@ public class BitUtilities {
 		return returnArray;
 	}
 
+	/**
+	 * Performs the xor operation.
+	 * @param keyData the key data
+	 * @return the resulting value
+	 */
 	public static byte xor(final byte... keyData) {
 		byte resultItem = 0;
 
@@ -291,6 +357,12 @@ public class BitUtilities {
 		return resultItem;
 	}
 
+	/**
+	 * Joins  byte arrays.
+	 * @param arrays the arrays
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static byte[] joinByteArrays(final byte[]... arrays) throws Exception {
 		final ByteArrayOutputStream out = new ByteArrayOutputStream();
 		for (final byte[] array : arrays) {
@@ -340,14 +412,30 @@ public class BitUtilities {
 		}
 	}
 
+	/**
+	 * Performs the hex to byte operation.
+	 * @param data the data
+	 * @return the resulting value
+	 */
 	public static byte hexToByte(final String data) {
 		return BitUtilities.hexToByte(data.charAt(0), data.charAt(1));
 	}
 
+	/**
+	 * Performs the hex to byte operation.
+	 * @param char1 the char1
+	 * @param char2 the char2
+	 * @return the resulting value
+	 */
 	public static byte hexToByte(final char char1, final char char2) {
 		return (byte) ((Character.digit(char1, 16) << 4) + Character.digit(char2, 16));
 	}
 
+	/**
+	 * Performs the byte to hex operation.
+	 * @param data the data
+	 * @return the resulting value
+	 */
 	public static String byteToHex(final byte data) {
 		return String.format("%02X", data);
 	}

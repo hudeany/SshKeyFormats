@@ -105,7 +105,13 @@ import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 import jdk.security.jarsigner.JarSigner;
 
+/**
+ * Provides functionality for cryptographic utilities.
+ */
 public class CryptographicUtilities {
+	/**
+	 * Public API constant or field: symmetric ciphers.
+	 */
 	public static final String[] SYMMETRIC_CIPHERS = {
 			// Block chiffre
 			"AES", "AESWrap", "Blowfish	", "Camellia", "CamelliaWrap", "CAST5", "CAST6", "DES", "DESede", "TripleDES", "3DES", "DESedeWrap", "GOST28147", "IDEA", "Noekeon", "RC2", "RC5", "RC5-64", "RC6", "Rijndael",
@@ -114,31 +120,67 @@ public class CryptographicUtilities {
 			// Stream chiffre
 			"RC4", "HC128", "HC256", "Salsa20", "VMPC", "Grainv1", "Grain128" };
 
+	/**
+	 * Public API constant or field: default symmetric encryption method.
+	 */
 	public static final String DEFAULT_SYMMETRIC_ENCRYPTION_METHOD = "AES/CBC/PKCS7Padding";
+	/**
+	 * Public API constant or field: known symmetric encryption methods.
+	 */
 	public static final String[] KNOWN_SYMMETRIC_ENCRYPTION_METHODS = new String[] {
 			"AES/CBC/PKCS7Padding", "DES/CBC/PKCS5Padding", "DES/CBC/X9.23Padding", "DES/OFB8/NoPadding",
 			"DES/ECB/WithCTS", "IDEA/CBC/ISO10126Padding", "IDEA/CBC/ISO7816-4Padding", "SKIPJACK/ECB/PKCS7Padding" };
 
+	/**
+	 * Public API constant or field: default signature method rsa.
+	 */
 	public static final String DEFAULT_SIGNATURE_METHOD_RSA = "SHA256WithRSA";
+	/**
+	 * Public API constant or field: known signature methods rsa.
+	 */
 	public static final String[] KNOWN_SIGNATURE_METHODS_RSA = new String[] { "MD2withRSA", "MD5withRSA", "SHA1withRSA",
 			"RIPEMD128withRSA", "RIPEMD160withRSA", "RIPEMD256withRSA", "SHA256withRSA", "SHA224withRSA", "SHA384withRSA",
 			"SHA512withRSA", "SHA1withRSAandMGF1", "SHA256withRSAandMGF1", "SHA384withRSAandMGF1", "SHA512withRSAandMGF1" };
 
+	/**
+	 * Public API constant or field: default signature method dsa.
+	 */
 	public static final String DEFAULT_SIGNATURE_METHOD_DSA = "SHA256withDSA";
+	/**
+	 * Public API constant or field: known signature methods dsa.
+	 */
 	public static final String[] KNOWN_SIGNATURE_METHODS_DSA = new String[] { "SHA256withDSA", "SHA1withDSA",
 			"SHA384withDSA", "SHA512withDSA", "NONEwithDSA" };
 
+	/**
+	 * Public API constant or field: default signature method ec.
+	 */
 	public static final String DEFAULT_SIGNATURE_METHOD_EC = "SHA256withECDSA";
+	/**
+	 * Public API constant or field: known signature methods ec.
+	 */
 	public static final String[] KNOWN_SIGNATURE_METHODS_EC = new String[] { "RIPEMD160withECDSA", "SHA1withECDSA",
 			"NONEwithECDSA", "SHA224withECDSA", "SHA256withECDSA", "SHA384withECDSA", "SHA512withECDSA", "SHA1withECNR",
 			"SHA224withECNR", "SHA256withECNR", "SHA384withECNR", "SHA512withECNR" };
 
+	/**
+	 * Public API constant or field: known signature methods others.
+	 */
 	public static final String[] KNOWN_SIGNATURE_METHODS_OTHERS = new String[] { "DSTU4145", "GOST3411withGOST3410", "GOST3411withGOST3410-94", "GOST3411withECGOST3410",
 	"GOST3411withGOST3410-2001" };
 
+	/**
+	 * Public API constant or field: asymmetric ciphers.
+	 */
 	public static final String[] ASYMMETRIC_CIPHERS = new String[] { "RSA", "EC", "ElGamal", "Ed25519", "Ed448" };
 
+	/**
+	 * Public API constant or field: default asymmetric encryption method rsa.
+	 */
 	public static final String DEFAULT_ASYMMETRIC_ENCRYPTION_METHOD_RSA = "RSA/ECB/PKCS1Padding";
+	/**
+	 * Public API constant or field: known asymmetric encryption methods rsa.
+	 */
 	public static final String[] KNOWN_ASYMMETRIC_ENCRYPTION_METHODS_RSA = new String[] {
 			"RSA/NONE/PKCS1Padding",
 			"RSA/NONE/OAEPPadding",
@@ -153,18 +195,36 @@ public class CryptographicUtilities {
 			"RSA/NONE/ISO9796-1Padding"
 	};
 
+	/**
+	 * Public API constant or field: default asymmetric encryption method ec.
+	 */
 	public static final String DEFAULT_ASYMMETRIC_ENCRYPTION_METHOD_EC = "ECIES";
+	/**
+	 * Public API constant or field: known asymmetric encryption methods ec.
+	 */
 	public static final String[] KNOWN_ASYMMETRIC_ENCRYPTION_METHODS_EC = new String[] {
 			"ECIES"
 	};
 
+	/**
+	 * Public API constant or field: default asymmetric encryption method elgamal.
+	 */
 	public static final String DEFAULT_ASYMMETRIC_ENCRYPTION_METHOD_ELGAMAL = "ELGAMAL/NONE/PKCS1PADDING";
+	/**
+	 * Public API constant or field: known asymmetric encryption methods elgamal.
+	 */
 	public static final String[] KNOWN_ASYMMETRIC_ENCRYPTION_METHODS_ELGAMAL = new String[] {
 			"ELGAMAL/NONE/NoPadding",
 			"ELGAMAL/NONE/PKCS1PADDING",
 	};
 
+	/**
+	 * Public API constant or field: default elliptic curve name.
+	 */
 	public static final String DEFAULT_ELLIPTIC_CURVE_NAME = "secp256k1";
+	/**
+	 * Public API constant or field: known elliptic curve names.
+	 */
 	public static final String[] KNOWN_ELLIPTIC_CURVE_NAMES = new String[] {
 			"secp112r1", "secp112r2", "secp128r1", "secp128r2", "secp160k1", "secp160r1", "secp160r2", "secp192k1",
 			"secp192r1", //= prime192v1
@@ -179,9 +239,21 @@ public class CryptographicUtilities {
 			"sect571k1", "sect571r1"
 	};
 
+	/**
+	 * Public API constant or field: encryption method ed25519.
+	 */
 	public static final String ENCRYPTION_METHOD_ED25519 = "ED25519";
+	/**
+	 * Public API constant or field: encryption method ed448.
+	 */
 	public static final String ENCRYPTION_METHOD_ED448 = "ED448";
 
+	/**
+	 * Generates  rsa key pair.
+	 * @param keyStrength the key strength
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static KeyPair generateRsaKeyPair(final int keyStrength) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -194,6 +266,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Generates  dsa key pair.
+	 * @param keyStrength the key strength
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static KeyPair generateDsaKeyPair(final int keyStrength) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -206,6 +284,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Generates  dh key pair.
+	 * @param keyStrength the key strength
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static KeyPair generateDhKeyPair(final int keyStrength) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -218,6 +302,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Generates  ec key pair.
+	 * @param ecCurveName the ec curve name
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static KeyPair generateEcKeyPair(final String ecCurveName) throws Exception {
 		if (ecCurveName == null || "".equals(ecCurveName.trim())) {
 			throw new Exception("Missing EC curve name parameter");
@@ -235,6 +325,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Generates  el gamal key pair.
+	 * @param keyStrength the key strength
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static KeyPair generateElGamalKeyPair(final int keyStrength) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -247,6 +343,11 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Generates  ed25519 key pair.
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static KeyPair generateEd25519KeyPair() throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -260,6 +361,11 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Generates  ed448 key pair.
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static KeyPair generateEd448KeyPair() throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -273,6 +379,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Returns the string from x509 certificate.
+	 * @param certificate the certificate
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static String getStringFromX509Certificate(final X509Certificate certificate) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -285,6 +397,13 @@ public class CryptographicUtilities {
 		return stringWriter.toString();
 	}
 
+	/**
+	 * Returns the string from key pair.
+	 * @param keyPair the key pair
+	 * @param password the password
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static String getStringFromKeyPair(final AsymmetricCipherKeyPair keyPair, final char[] password) throws Exception {
 		final PublicKey publicKey = getPublicKeyFromAsymmetricCipherKeyPair(keyPair);
 		final PrivateKey privateKey = getPrivateKeyFromAsymmetricCipherKeyPair(keyPair);
@@ -292,6 +411,13 @@ public class CryptographicUtilities {
 		return getStringFromKeyPair(privateKey, password, publicKey);
 	}
 
+	/**
+	 * Returns the string from key pair.
+	 * @param keyPair the key pair
+	 * @param password the password
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static String getStringFromKeyPair(final KeyPair keyPair, final char[] password) throws Exception {
 		final PublicKey publicKey = keyPair.getPublic();
 		final PrivateKey privateKey = keyPair.getPrivate();
@@ -299,6 +425,14 @@ public class CryptographicUtilities {
 		return getStringFromKeyPair(privateKey, password, publicKey);
 	}
 
+	/**
+	 * Returns the string from key pair.
+	 * @param privateKey the private key
+	 * @param password the password
+	 * @param publicKey the public key
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static String getStringFromKeyPair(final PrivateKey privateKey, final char[] password, final PublicKey publicKey) throws Exception {
 		final StringBuilder result = new StringBuilder();
 		result.append(getStringFromKey(privateKey, password));
@@ -306,6 +440,12 @@ public class CryptographicUtilities {
 		return result.toString();
 	}
 
+	/**
+	 * Returns the string from key.
+	 * @param publicKey the public key
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static String getStringFromKey(final PublicKey publicKey) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -318,6 +458,13 @@ public class CryptographicUtilities {
 		return stringWriter.toString();
 	}
 
+	/**
+	 * Returns the string from key.
+	 * @param privateKey the private key
+	 * @param password the password
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static String getStringFromKey(final PrivateKey privateKey, final char[] password) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -356,6 +503,13 @@ public class CryptographicUtilities {
 		return new KeyPair(keyFac.generatePublic(spkiKeySpec), keyFac.generatePrivate(pkcs8KeySpec));
 	}
 
+	/**
+	 * Returns the asymmetric cipher key pair.
+	 * @param privateKey the private key
+	 * @param publicKey the public key
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static AsymmetricCipherKeyPair getAsymmetricCipherKeyPair(final PrivateKey privateKey, final PublicKey publicKey) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -366,6 +520,12 @@ public class CryptographicUtilities {
 		return new AsymmetricCipherKeyPair(privateAsymmetricKeyParameter, publicAsymmetricKeyParameter);
 	}
 
+	/**
+	 * Returns the public key from asymmetric cipher key pair.
+	 * @param keyPair the key pair
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static PublicKey getPublicKeyFromAsymmetricCipherKeyPair(final AsymmetricCipherKeyPair keyPair) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -373,6 +533,12 @@ public class CryptographicUtilities {
 		return KeyFactory.getInstance("RSA").generatePublic(new RSAPublicKeySpec(publicKey.getModulus(), publicKey.getExponent()));
 	}
 
+	/**
+	 * Returns the public key from key pair.
+	 * @param keyPair the key pair
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static PublicKey getPublicKeyFromKeyPair(final KeyPair keyPair) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -380,6 +546,12 @@ public class CryptographicUtilities {
 		return KeyFactory.getInstance("RSA").generatePublic(new RSAPublicKeySpec(publicKey.getModulus(), publicKey.getExponent()));
 	}
 
+	/**
+	 * Returns the private key from asymmetric cipher key pair.
+	 * @param keyPair the key pair
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static PrivateKey getPrivateKeyFromAsymmetricCipherKeyPair(final AsymmetricCipherKeyPair keyPair) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -448,10 +620,25 @@ public class CryptographicUtilities {
 	 */
 	public static final int DEFAULT_PASSWORD_STRETCH_ITERATIONS = 210_000;
 
+	/**
+	 * Performs the stretch password operation.
+	 * @param password the password
+	 * @param keyLength the key length
+	 * @param salt the salt
+	 * @return the resulting value
+	 */
 	public static byte[] stretchPassword(final char[] password, final int keyLength, final byte[] salt) {
 		return stretchPassword(password, keyLength, salt, DEFAULT_PASSWORD_STRETCH_ITERATIONS);
 	}
 
+	/**
+	 * Performs the stretch password operation.
+	 * @param password the password
+	 * @param keyLength the key length
+	 * @param salt the salt
+	 * @param iterations the iterations
+	 * @return the resulting value
+	 */
 	public static byte[] stretchPassword(final char[] password, final int keyLength, final byte[] salt, final int iterations) {
 		if (iterations <= 0) {
 			throw new IllegalArgumentException("Invalid iterations value: " + iterations);
@@ -469,7 +656,7 @@ public class CryptographicUtilities {
 	 * Check if jar file has a signature and has only signed class and resource files
 	 *
 	 * @param jarFile
-	 * @return
+	 * @return the certificates at the roots of the supplied chains
 	 * @throws Exception
 	 */
 	public static boolean checkJarIsCompletlySigned(final File jarFile) throws Exception {
@@ -516,6 +703,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Verifies  jar signature.
+	 * @param jarFile the jar file
+	 * @param trustedCertificates the trusted certificates
+	 * @return the resulting value
+	 */
 	public static boolean verifyJarSignature(final File jarFile, final Collection<? extends Certificate> trustedCertificates) {
 		if (trustedCertificates == null || trustedCertificates.size() == 0) {
 			return false;
@@ -571,6 +764,15 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Creates  jar signature.
+	 * @param unsignedJarFile the unsigned jar file
+	 * @param privateKey the private key
+	 * @param certPath the cert path
+	 * @param signedJarFile the signed jar file
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static void createJarSignature(final File unsignedJarFile, final PrivateKey privateKey, final CertPath certPath, final File signedJarFile) throws Exception {
 		final JarSigner signer = new JarSigner.Builder(privateKey, certPath).build();
 		try (ZipFile in = new ZipFile(unsignedJarFile);
@@ -579,14 +781,32 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Creates  x509 cert path.
+	 * @param certs the certs
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static CertPath createX509CertPath(final Certificate[] certs) throws Exception {
 		return CertificateFactory.getInstance("X509").generateCertPath(Arrays.asList(certs));
 	}
 
+	/**
+	 * Creates  x509 cert path.
+	 * @param certs the certs
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static CertPath createX509CertPath(final List<X509Certificate> certs) throws Exception {
 		return CertificateFactory.getInstance("X509").generateCertPath(certs);
 	}
 
+	/**
+	 * Creates  x509 cert path.
+	 * @param cert the cert
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static CertPath createX509CertPath(final X509Certificate cert) throws Exception {
 		final List<Certificate> certs = new ArrayList<>();
 		certs.add(cert);
@@ -598,7 +818,7 @@ public class CryptographicUtilities {
 	 *
 	 * @param certificate
 	 * @param trustedCertificates
-	 * @return
+	 * @return information describing the supplied key
 	 * @throws Exception
 	 */
 	public static boolean verifyChainOfTrust(final X509Certificate certificate, final Collection<? extends Certificate> trustedCertificates) throws Exception {
@@ -625,7 +845,7 @@ public class CryptographicUtilities {
 	 *
 	 * @param certificate
 	 * @param trustedCertificates
-	 * @return
+	 * @return true if the private key matches the public key
 	 * @throws Exception
 	 */
 	public static boolean verifyChainOfTrust(final X509Certificate certificate, final Certificate... trustedCertificates) throws Exception {
@@ -647,6 +867,11 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Returns the chain root certificates.
+	 * @param certificates the certificates
+	 * @return the resulting value
+	 */
 	public static X509Certificate[] getChainRootCertificates(final Certificate[] certificates) {
 		final Vector<X509Certificate> result = new Vector<>();
 		for (int i = 0; i < certificates.length - 1; i++) {
@@ -661,6 +886,12 @@ public class CryptographicUtilities {
 		return returnValue;
 	}
 
+	/**
+	 * Loads  certificates from pem stream.
+	 * @param pemInputStream the pem input stream
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static Collection<? extends X509Certificate> loadCertificatesFromPemStream(final InputStream pemInputStream) throws Exception {
 		final CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
 		@SuppressWarnings("unchecked")
@@ -668,100 +899,211 @@ public class CryptographicUtilities {
 		return certificates;
 	}
 
+	/**
+	 * Checks  for ca certificate.
+	 * @param certificate the certificate
+	 * @return the resulting value
+	 */
 	public static boolean checkForCaCertificate(final X509Certificate certificate) {
 		return certificate.getBasicConstraints() >= 0;
 	}
 
+	/**
+	 * Returns the md5 finger print.
+	 * @param certificate the certificate
+	 * @return the resulting value
+	 * @throws CertificateEncodingException if the operation cannot be completed
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getMd5FingerPrint(final X509Certificate certificate) throws CertificateEncodingException, NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("MD5");
 		md.update(certificate.getEncoded());
 		return BitUtilities.toHexString(md.digest());
 	}
 
+	/**
+	 * Returns the sha1 finger print.
+	 * @param certificate the certificate
+	 * @return the resulting value
+	 * @throws CertificateEncodingException if the operation cannot be completed
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getSha1FingerPrint(final X509Certificate certificate) throws CertificateEncodingException, NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-1");
 		md.update(certificate.getEncoded());
 		return BitUtilities.toHexString(md.digest());
 	}
 
+	/**
+	 * Returns the sha256 finger print.
+	 * @param certificate the certificate
+	 * @return the resulting value
+	 * @throws CertificateEncodingException if the operation cannot be completed
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getSha256FingerPrint(final X509Certificate certificate) throws CertificateEncodingException, NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-256");
 		md.update(certificate.getEncoded());
 		return BitUtilities.toHexString(md.digest());
 	}
 
+	/**
+	 * Returns the sha384 finger print.
+	 * @param certificate the certificate
+	 * @return the resulting value
+	 * @throws CertificateEncodingException if the operation cannot be completed
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getSha384FingerPrint(final X509Certificate certificate) throws CertificateEncodingException, NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-384");
 		md.update(certificate.getEncoded());
 		return BitUtilities.toHexString(md.digest());
 	}
 
+	/**
+	 * Returns the sha512 finger print.
+	 * @param certificate the certificate
+	 * @return the resulting value
+	 * @throws CertificateEncodingException if the operation cannot be completed
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getSha512FingerPrint(final X509Certificate certificate) throws CertificateEncodingException, NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-512");
 		md.update(certificate.getEncoded());
 		return BitUtilities.toHexString(md.digest());
 	}
 
+	/**
+	 * Returns the md5 finger print.
+	 * @param key the key
+	 * @param byteSeparator the byte separator
+	 * @return the resulting value
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getMd5FingerPrint(final Key key, final String byteSeparator) throws NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("MD5");
 		md.update(key.getEncoded());
 		return BitUtilities.toHexString(md.digest(), byteSeparator);
 	}
 
+	/**
+	 * Returns the md5 finger print base64.
+	 * @param key the key
+	 * @return the resulting value
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getMd5FingerPrintBase64(final Key key) throws NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("MD5");
 		md.update(key.getEncoded());
 		return Base64.getEncoder().encodeToString(md.digest());
 	}
 
+	/**
+	 * Returns the sha1 finger print.
+	 * @param key the key
+	 * @param byteSeparator the byte separator
+	 * @return the resulting value
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getSha1FingerPrint(final Key key, final String byteSeparator) throws NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-1");
 		md.update(key.getEncoded());
 		return BitUtilities.toHexString(md.digest(), byteSeparator);
 	}
 
+	/**
+	 * Returns the sha1 finger print base64.
+	 * @param key the key
+	 * @return the resulting value
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getSha1FingerPrintBase64(final Key key) throws NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-1");
 		md.update(key.getEncoded());
 		return Base64.getEncoder().encodeToString(md.digest());
 	}
 
+	/**
+	 * Returns the sha256 finger print.
+	 * @param key the key
+	 * @param byteSeparator the byte separator
+	 * @return the resulting value
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getSha256FingerPrint(final Key key, final String byteSeparator) throws NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-256");
 		md.update(key.getEncoded());
 		return BitUtilities.toHexString(md.digest(), byteSeparator);
 	}
 
+	/**
+	 * Returns the sha256 finger print base64.
+	 * @param key the key
+	 * @return the resulting value
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getSha256FingerPrintBase64(final Key key) throws NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-256");
 		md.update(key.getEncoded());
 		return Base64.getEncoder().encodeToString(md.digest());
 	}
 
+	/**
+	 * Returns the sha384 finger print.
+	 * @param key the key
+	 * @param byteSeparator the byte separator
+	 * @return the resulting value
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getSha384FingerPrint(final Key key, final String byteSeparator) throws NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-384");
 		md.update(key.getEncoded());
 		return BitUtilities.toHexString(md.digest(), byteSeparator);
 	}
 
+	/**
+	 * Returns the sha384 finger print base64.
+	 * @param key the key
+	 * @return the resulting value
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getSha384FingerPrintBase64(final Key key) throws NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-384");
 		md.update(key.getEncoded());
 		return Base64.getEncoder().encodeToString(md.digest());
 	}
 
+	/**
+	 * Returns the sha512 finger print.
+	 * @param key the key
+	 * @param byteSeparator the byte separator
+	 * @return the resulting value
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getSha512FingerPrint(final Key key, final String byteSeparator) throws NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-512");
 		md.update(key.getEncoded());
 		return BitUtilities.toHexString(md.digest(), byteSeparator);
 	}
 
+	/**
+	 * Returns the sha512 finger print base64.
+	 * @param key the key
+	 * @return the resulting value
+	 * @throws NoSuchAlgorithmException if the operation cannot be completed
+	 */
 	public static String getSha512FingerPrintBase64(final Key key) throws NoSuchAlgorithmException {
 		final MessageDigest md = MessageDigest.getInstance("SHA-512");
 		md.update(key.getEncoded());
 		return Base64.getEncoder().encodeToString(md.digest());
 	}
 
+	/**
+	 * Converts  pemkey pair to key pair.
+	 * @param keyPair the key pair
+	 * @return the resulting value
+	 * @throws PEMException if the operation cannot be completed
+	 */
 	public static KeyPair convertPEMKeyPairToKeyPair(final PEMKeyPair keyPair) throws PEMException {
 		try {
 			String algorithm = keyPair.getPrivateKeyInfo().getPrivateKeyAlgorithm().getAlgorithm().getId();
@@ -779,6 +1121,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Returns the public key from string.
+	 * @param keyDataString the key data string
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static PublicKey getPublicKeyFromString(final String keyDataString) throws Exception {
 		try {
 			Security.addProvider(new BouncyCastleProvider());
@@ -802,6 +1150,11 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Returns the key info.
+	 * @param key the key
+	 * @return the resulting value
+	 */
 	public static String getKeyInfo(final Key key) {
 		String dataOutput = "";
 		dataOutput += "Algorithm: " + key.getAlgorithm();
@@ -871,6 +1224,13 @@ public class CryptographicUtilities {
 		return dataOutput;
 	}
 
+	/**
+	 * Checks  private key fits public key.
+	 * @param privateKey the private key
+	 * @param publicKey the public key
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static boolean checkPrivateKeyFitsPublicKey(final PrivateKey privateKey, final PublicKey publicKey) throws Exception {
 		final Signature challengeSignature;
 		if (privateKey == null) {
@@ -912,6 +1272,11 @@ public class CryptographicUtilities {
 		return challengeSignature.verify(signature);
 	}
 
+	/**
+	 * Checks  signature method name.
+	 * @param signatureMethodName the signature method name
+	 * @return the resulting value
+	 */
 	public static String checkSignatureMethodName(final String signatureMethodName) {
 		for (final String signatureMethodNameItem : KNOWN_SIGNATURE_METHODS_RSA) {
 			if (signatureMethodNameItem.replace(" ", "").replace("_", "").replace("/", "").replace("-", "").equalsIgnoreCase(signatureMethodName.replace(" ", "").replace("_", "").replace("/", "").replace("-", ""))) {
@@ -936,6 +1301,11 @@ public class CryptographicUtilities {
 		return null;
 	}
 
+	/**
+	 * Returns the asn1 object identifier by encryption method name.
+	 * @param encryptionMethodName the encryption method name
+	 * @return the resulting value
+	 */
 	public static ASN1ObjectIdentifier getASN1ObjectIdentifierByEncryptionMethodName(final String encryptionMethodName) {
 		try {
 			for (final Field field : CMSAlgorithm.class.getDeclaredFields()) {
@@ -949,6 +1319,11 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Checks  encryption method name.
+	 * @param encryptionMethodName the encryption method name
+	 * @return the resulting value
+	 */
 	public static String checkEncryptionMethodName(final String encryptionMethodName) {
 		try {
 			for (final Field field : CMSAlgorithm.class.getDeclaredFields()) {
@@ -962,6 +1337,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Returns the string from certification request.
+	 * @param certificationRequest the certification request
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static String getStringFromCertificationRequest(final PKCS10CertificationRequest certificationRequest) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -974,6 +1355,12 @@ public class CryptographicUtilities {
 		return writer.toString();
 	}
 
+	/**
+	 * Returns the certification request from string.
+	 * @param encodedCertificationRequest the encoded certification request
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static PKCS10CertificationRequest getCertificationRequestFromString(final String encodedCertificationRequest) throws Exception {
 		Security.addProvider(new BouncyCastleProvider());
 
@@ -986,6 +1373,11 @@ public class CryptographicUtilities {
 		return certificationRequest;
 	}
 
+	/**
+	 * Returns whether  key store file.
+	 * @param potentialKeyStoreFile the potential key store file
+	 * @return the resulting value
+	 */
 	public static boolean isKeyStoreFile(final File potentialKeyStoreFile) {
 		if (potentialKeyStoreFile != null && potentialKeyStoreFile.exists()) {
 			try (InputStream keyStoreInputStream = new FileInputStream(potentialKeyStoreFile)) {
@@ -1000,6 +1392,11 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Returns whether  java key store file.
+	 * @param potentialJavaKeyStoreFile the potential java key store file
+	 * @return the resulting value
+	 */
 	public static boolean isJavaKeyStoreFile(final File potentialJavaKeyStoreFile) {
 		if (potentialJavaKeyStoreFile != null && potentialJavaKeyStoreFile.exists()) {
 			final byte[] firstBytes = new byte[4];
@@ -1018,6 +1415,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Returns the public key from private key.
+	 * @param privateKey the private key
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static PublicKey getPublicKeyFromPrivateKey(final PrivateKey privateKey) throws Exception {
 		if (privateKey == null) {
 			throw new Exception("Cannot extract PublicKey from empty PrivateKey");
@@ -1052,6 +1455,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Returns the key aliases from java key store.
+	 * @param keyStore the key store
+	 * @return the resulting value
+	 * @throws KeyStoreException if the operation cannot be completed
+	 */
 	public static List<String> getKeyAliasesFromJavaKeyStore(final KeyStore keyStore) throws KeyStoreException {
 		final List<String> keyAliases = new ArrayList<>();
 		for (final String alias : Collections.list(keyStore.aliases())) {
@@ -1068,6 +1477,12 @@ public class CryptographicUtilities {
 		return keyAliases;
 	}
 
+	/**
+	 * Returns the certificates from java key store.
+	 * @param keyStore the key store
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static List<X509Certificate> getCertificatesFromJavaKeyStore(final KeyStore keyStore) throws Exception {
 		final List<X509Certificate> certificates = new ArrayList<>();
 		for (final String alias : Collections.list(keyStore.aliases())) {
@@ -1088,6 +1503,12 @@ public class CryptographicUtilities {
 		return certificates;
 	}
 
+	/**
+	 * Returns the ec dsa elliptic curve name.
+	 * @param publicKeyEC the public key ec
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static String getEcDsaEllipticCurveName(final ECPublicKey publicKeyEC) throws Exception {
 		final DerTag enclosingDerTag = Asn1Codec.readDerTag(publicKeyEC.getEncoded());
 		if (Asn1Codec.DER_TAG_SEQUENCE != enclosingDerTag.getTagId()) {
@@ -1115,6 +1536,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Returns the ec dsa elliptic curve name.
+	 * @param ecPrivateKey the ec private key
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static String getEcDsaEllipticCurveName(final ECPrivateKey ecPrivateKey) throws Exception {
 		final DerTag enclosingDerTag = Asn1Codec.readDerTag(ecPrivateKey.getEncoded());
 		if (Asn1Codec.DER_TAG_SEQUENCE != enclosingDerTag.getTagId()) {
@@ -1148,6 +1575,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Returns the elliptic curve name.
+	 * @param publicKey the public key
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static final String getEllipticCurveName(final PublicKey publicKey) throws Exception{
 		if (publicKey instanceof ECPublicKey) {
 			final ECPublicKey pk = (ECPublicKey) publicKey;
@@ -1161,6 +1594,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Returns the elliptic curve name.
+	 * @param privateKey the private key
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static final String getEllipticCurveName(final PrivateKey privateKey) throws Exception{
 		if (privateKey instanceof ECPrivateKey) {
 			final ECPrivateKey pk = (ECPrivateKey) privateKey;
@@ -1174,6 +1613,12 @@ public class CryptographicUtilities {
 		}
 	}
 
+	/**
+	 * Returns the elliptic curve name.
+	 * @param ecParameterSpec the ec parameter spec
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static final String getEllipticCurveName(final ECParameterSpec ecParameterSpec) throws Exception{
 		final Enumeration<?> curveNamesEnumeration = org.bouncycastle.asn1.x9.ECNamedCurveTable.getNames();
 		while (curveNamesEnumeration.hasMoreElements()) {

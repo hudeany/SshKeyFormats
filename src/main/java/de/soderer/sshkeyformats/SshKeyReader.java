@@ -94,7 +94,7 @@ public class SshKeyReader {
 	 * This reads multiple stored public keys, like in authorized keys files.<br />
 	 *
 	 * @param inputStream
-	 * @return
+	 * @return all public keys read from the input stream
 	 * @throws Exception
 	 */
 	public static List<SshKey> readAllPublicKeys(final InputStream inputStream) throws Exception {
@@ -115,7 +115,7 @@ public class SshKeyReader {
 	 *
 	 * @param inputStream
 	 * @param passwordChars
-	 * @return
+	 * @return the parsed SSH key
 	 * @throws Exception
 	 */
 	public static SshKey readKey(final InputStream inputStream, final char[] passwordChars) throws Exception {

@@ -616,6 +616,14 @@ public class SshKeyWriter {
 		return dataPadded;
 	}
 
+	/**
+	 * Writes  putty version2 key.
+	 * @param outputStream the output stream
+	 * @param sshKey the ssh key
+	 * @param passwordChars the password chars
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static void writePuttyVersion2Key(final OutputStream outputStream, final SshKey sshKey, final char[] passwordChars) throws Exception {
 		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
 			final Algorithm algorithm = sshKey.getAlgorithm();
@@ -682,6 +690,14 @@ public class SshKeyWriter {
 		}
 	}
 
+	/**
+	 * Writes  putty version3 key.
+	 * @param outputStream the output stream
+	 * @param sshKey the ssh key
+	 * @param passwordChars the password chars
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static void writePuttyVersion3Key(final OutputStream outputStream, final SshKey sshKey, final char[] passwordChars) throws Exception {
 		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
 			final Algorithm algorithm = sshKey.getAlgorithm();

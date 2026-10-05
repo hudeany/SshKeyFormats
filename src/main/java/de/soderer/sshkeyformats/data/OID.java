@@ -4,6 +4,9 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Provides functionality for oid.
+ */
 public class OID {
 	/**
 	 * OID for RSA algorithm
@@ -55,6 +58,11 @@ public class OID {
 
 	private int[] id;
 
+	/**
+	 * Creates an object identifier from its dotted string representation.
+	 * @param oidString the oid string
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public OID(final String oidString) throws Exception {
 		if (oidString == null || "".equals(oidString.trim())) {
 			throw new Exception("Invalid OID empty data");
@@ -71,6 +79,11 @@ public class OID {
 		}
 	}
 
+	/**
+	 * Creates an object identifier from its encoded byte representation.
+	 * @param oidArray the oid array
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public OID(final byte[] oidArray) throws Exception {
 		if (oidArray == null || oidArray.length == 0) {
 			throw new Exception("Invalid OID empty data");
@@ -90,6 +103,10 @@ public class OID {
 		}
 	}
 
+	/**
+	 * Returns the string encoding.
+	 * @return the resulting value
+	 */
 	public String getStringEncoding() {
 		final StringBuilder returnValue = new StringBuilder();
 		for (final int idPart : id) {
@@ -101,6 +118,11 @@ public class OID {
 		return returnValue.toString();
 	}
 
+	/**
+	 * Returns the byte array encoding.
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public byte[] getByteArrayEncoding() throws Exception {
 		final ByteArrayOutputStream out = new ByteArrayOutputStream();
 
@@ -119,6 +141,12 @@ public class OID {
 		return out.toByteArray();
 	}
 
+	/**
+	 * Encodes  integer.
+	 * @param value the value
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static byte[] encodeInteger(final long value) throws Exception {
 		if (value < 0) {
 			throw new Exception("Minimum encoded Integer underrun");
@@ -143,6 +171,13 @@ public class OID {
 		}
 	}
 
+	/**
+	 * Decodes  integer.
+	 * @param array the array
+	 * @param startIndex the start index
+	 * @return the resulting value
+	 * @throws Exception if the operation cannot be completed
+	 */
 	public static long decodeInteger(final byte[] array, final int startIndex) throws Exception {
 		if (array.length == 0 || startIndex >= array.length) {
 			throw new Exception("Invalid encoded Integer data");
