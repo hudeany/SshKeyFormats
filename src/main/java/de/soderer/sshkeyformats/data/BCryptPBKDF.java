@@ -136,11 +136,11 @@ public class BCryptPBKDF {
 	/**
 	 * Derive a byte array from a password (Password-Based Key Derivation Function) for use in other ciphers
 	 *
-	 * @param password
-	 * @param salt
-	 * @param rounds
-	 * @param output
-	 * @throws Exception
+	 * @param password the password bytes used as key derivation input
+	 * @param salt the salt used during key derivation
+	 * @param rounds the number of key derivation rounds
+	 * @param output the byte array receiving the derived key
+	 * @throws Exception if the required cryptographic algorithm is unavailable
 	 */
 	public void derivePassword(final byte[] password, final byte[] salt, final int rounds, final byte[] output) throws Exception {
 		try {

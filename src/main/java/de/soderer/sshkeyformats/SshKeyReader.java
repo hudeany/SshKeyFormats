@@ -89,13 +89,14 @@ public class SshKeyReader {
 	private static final int MAX_BCRYPT_KDF_ROUNDS = 1_000_000;
 
 	/**
-	 * Read public key data only and ignore the private key parts.<br />
-	 * This may be useful if you only need the public key and don't know the password of the encrypted private key.<br />
-	 * This reads multiple stored public keys, like in authorized keys files.<br />
+	 * Reads all public key data and ignores private key parts.
+	 * <p>
+	 * This is useful when only the public keys are needed and the password of an
+	 * encrypted private key is not available.
 	 *
-	 * @param inputStream
-	 * @return all public keys read from the input stream
-	 * @throws Exception
+	 * @param inputStream the input stream containing one or more SSH public keys
+	 * @return the public keys found in the input stream
+	 * @throws Exception if the input cannot be parsed
 	 */
 	public static List<SshKey> readAllPublicKeys(final InputStream inputStream) throws Exception {
 		try (final BufferedReader dataReader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.ISO_8859_1))) {
@@ -109,14 +110,15 @@ public class SshKeyReader {
 	}
 
 	/**
-	 * Read public and private key data, as far as they are included.<br />
-	 * Definition of a password is optional. Use NULL for unencrypted private keys.<br />
-	 * On multiple stored public keys (like authorized keys files) only the first key is read.<br />
+	 * Reads public and private key data, as far as it is available.
+	 * <p>
+	 * A password is optional and should be {@code null} for unencrypted private keys.
+	 * When multiple public keys are stored in the input, only the first key is read.
 	 *
-	 * @param inputStream
-	 * @param passwordChars
-	 * @return the parsed SSH key
-	 * @throws Exception
+	 * @param inputStream the input stream containing the SSH key
+	 * @param passwordChars the password for an encrypted private key, or {@code null} for an unencrypted key
+	 * @return the first SSH key found in the input stream
+	 * @throws Exception if the input cannot be parsed or the password is incorrect
 	 */
 	public static SshKey readKey(final InputStream inputStream, final char[] passwordChars) throws Exception {
 		try (final BufferedReader dataReader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.ISO_8859_1))) {

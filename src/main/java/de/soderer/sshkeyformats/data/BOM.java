@@ -48,10 +48,10 @@ public final class BOM {
 		this.description = description;
 	}
 
-	/**
-	 * Returns the bytes.
-	 * @return the resulting value
-	 */
+/**
+ * getBytes operation.
+ * @return the resulting value.
+ */
 	public byte[] getBytes() {
 		final int length = bytes.length;
 		final byte[] result = new byte[length];
@@ -60,10 +60,10 @@ public final class BOM {
 	}
 
 	@Override
-	/**
-	 * Converts the value to  string.
-	 * @return the resulting value
-	 */
+/**
+ * toString operation.
+ * @return the resulting value.
+ */
 	public String toString() {
 		return description;
 	}

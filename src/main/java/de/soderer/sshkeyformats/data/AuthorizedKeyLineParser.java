@@ -6,7 +6,7 @@ import java.util.Map;
 import de.soderer.sshkeyformats.AuthorizedKey;
 
 /**
- * Provides functionality for authorized key line parser.
+ * AuthorizedKeyLineParser API.
  */
 public class AuthorizedKeyLineParser {
 	private static String COMMAND_PREFIX = "command=";
@@ -25,12 +25,12 @@ public class AuthorizedKeyLineParser {
 	private char[] currentLineTextArray;
 	private int currentLineReadIndex;
 
-	/**
-	 * Parses  authorized key line.
-	 * @param authorizedKeyLine the authorized key line
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * parseAuthorizedKeyLine operation.
+ * @param authorizedKeyLine the authorizedKeyLine value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public AuthorizedKey parseAuthorizedKeyLine(final String authorizedKeyLine) throws Exception {
 		try {
 			currentLineTextArray = authorizedKeyLine.trim().toCharArray();

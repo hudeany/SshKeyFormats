@@ -49,12 +49,12 @@ public class Asn1Codec {
 	 */
 	public static final int DER_TAG_CONTEXT_SPECIFIC_1 = 0xA1;
 
-	/**
-	 * Returns the asn encoded integer.
-	 * @param value the value
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getAsnEncodedInteger operation.
+ * @param value the value value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static byte[] getAsnEncodedInteger(final long value) throws Exception {
 		if (value < 0) {
 			throw new Exception("Minimum ASN.1 encoded Integer underrun");
@@ -78,13 +78,13 @@ public class Asn1Codec {
 		}
 	}
 
-	/**
-	 * Parses  asn encoded integer.
-	 * @param data the data
-	 * @param offset the offset
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * parseAsnEncodedInteger operation.
+ * @param data the data value.
+ * @param offset the offset value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static BigInteger parseAsnEncodedInteger(final byte[] data, final int offset) throws Exception {
 		try {
 			final DataInput blockDataInput = new DataInputStream(new ByteArrayInputStream(data));
@@ -102,13 +102,13 @@ public class Asn1Codec {
 		}
 	}
 
-	/**
-	 * Creates  der tag data.
-	 * @param derTagId the der tag id
-	 * @param derDataItems the der data items
-	 * @return the resulting value
-	 * @throws IOException if the operation cannot be completed
-	 */
+/**
+ * createDerTagData operation.
+ * @param derTagId the derTagId value.
+ * @param derDataItems the derDataItems value.
+ * @return the resulting value.
+ * @throws IOException if the operation cannot be completed.
+ */
 	public static byte[] createDerTagData(final int derTagId, final byte[]... derDataItems) throws IOException {
 		final ByteArrayOutputStream out = new ByteArrayOutputStream();
 		out.write(derTagId);
@@ -140,12 +140,12 @@ public class Asn1Codec {
 		return lengthInBytes;
 	}
 
-	/**
-	 * Reads  der tag.
-	 * @param data the data
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * readDerTag operation.
+ * @param data the data value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static DerTag readDerTag(final byte[] data) throws Exception {
 		try {
 			final ByteArrayInputStream input = new ByteArrayInputStream(data);
@@ -203,12 +203,12 @@ public class Asn1Codec {
 	 */
 	private static final int MAX_DER_TAG_DATA_LENGTH = 16 * 1024 * 1024; // 16 MB
 
-	/**
-	 * Reads  der tags.
-	 * @param data the data
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * readDerTags operation.
+ * @param data the data value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static List<DerTag> readDerTags(final byte[] data) throws Exception {
 		try {
 			final ByteArrayInputStream input = new ByteArrayInputStream(data);
@@ -258,60 +258,60 @@ public class Asn1Codec {
 		}
 	}
 
-	/**
-	 * Provides functionality for der tag.
-	 */
+/**
+ * DerTag API.
+ */
 	public static class DerTag {
 		int tagId;
 		byte[] data;
 
-		/**
-		 * Creates a DER tag with the supplied tag identifier and encoded data.
-		 * @param tagId the tag id
-		 * @param data the data
-		 */
+/**
+ * DerTag operation.
+ * @param tagId the tagId value.
+ * @param data the data value.
+ */
 		public DerTag(final int tagId, final byte[] data) {
 			this.tagId = tagId;
 			this.data = data;
 		}
 
-		/**
-		 * Returns the tag id.
-		 * @return the resulting value
-		 */
+/**
+ * getTagId operation.
+ * @return the resulting value.
+ */
 		public int getTagId() {
 			return tagId;
 		}
 
-		/**
-		 * Sets  tag id.
-		 * @param tagId the tag id
-		 */
+/**
+ * setTagId operation.
+ * @param tagId the tagId value.
+ */
 		public void setTagId(final int tagId) {
 			this.tagId = tagId;
 		}
 
-		/**
-		 * Returns the data.
-		 * @return the resulting value
-		 */
+/**
+ * getData operation.
+ * @return the resulting value.
+ */
 		public byte[] getData() {
 			return data;
 		}
 
-		/**
-		 * Sets  data.
-		 * @param data the data
-		 */
+/**
+ * setData operation.
+ * @param data the data value.
+ */
 		public void setData(final byte[] data) {
 			this.data = data;
 		}
 
 		@Override
-		/**
-		 * Converts the value to  string.
-		 * @return the resulting value
-		 */
+/**
+ * toString operation.
+ * @return the resulting value.
+ */
 		public String toString() {
 			return tagId + " (length " + data.length + "): " + Arrays.toString(data);
 		}

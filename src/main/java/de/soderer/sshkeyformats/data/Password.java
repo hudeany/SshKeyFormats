@@ -24,26 +24,26 @@ public class Password implements Closeable {
 	private byte[] passwordBytesIsoEncoded = null;
 	private final List<byte[]> sensitiveDataToCleanup = new ArrayList<>();
 
-	/**
-	 * Creates a password wrapper around the supplied character array.
-	 * @param passwordChars the password chars
-	 */
+/**
+ * Password operation.
+ * @param passwordChars the passwordChars value.
+ */
 	public Password(final char[] passwordChars) {
 		this.passwordChars = passwordChars;
 	}
 
-	/**
-	 * Returns the password chars.
-	 * @return the resulting value
-	 */
+/**
+ * getPasswordChars operation.
+ * @return the resulting value.
+ */
 	public char[] getPasswordChars() {
 		return passwordChars;
 	}
 
-	/**
-	 * Returns the password bytes utf encoded.
-	 * @return the resulting value
-	 */
+/**
+ * getPasswordBytesUtfEncoded operation.
+ * @return the resulting value.
+ */
 	public byte[] getPasswordBytesUtfEncoded() {
 		if (passwordBytesUtfEncoded == null) {
 			passwordBytesUtfEncoded = encodeCharArrayToByteArray(passwordChars, StandardCharsets.UTF_8);
@@ -51,10 +51,10 @@ public class Password implements Closeable {
 		return passwordBytesUtfEncoded;
 	}
 
-	/**
-	 * Returns the password bytes iso encoded.
-	 * @return the resulting value
-	 */
+/**
+ * getPasswordBytesIsoEncoded operation.
+ * @return the resulting value.
+ */
 	public byte[] getPasswordBytesIsoEncoded() {
 		if (passwordBytesIsoEncoded == null) {
 			passwordBytesIsoEncoded = encodeCharArrayToByteArray(passwordChars, StandardCharsets.ISO_8859_1);
@@ -62,18 +62,18 @@ public class Password implements Closeable {
 		return passwordBytesIsoEncoded;
 	}
 
-	/**
-	 * Adds  sensitive data to cleanup.
-	 * @param sensitiveData the sensitive data
-	 */
+/**
+ * addSensitiveDataToCleanup operation.
+ * @param sensitiveData the sensitiveData value.
+ */
 	public void addSensitiveDataToCleanup(final byte[] sensitiveData) {
 		sensitiveDataToCleanup.add(sensitiveData);
 	}
 
 	@Override
-	/**
-	 * Closes this object and releases its sensitive or associated resources.
-	 */
+/**
+ * close operation.
+ */
 	public void close() {
 		if (passwordChars != null) {
 			Arrays.fill(passwordChars, (char) 0);

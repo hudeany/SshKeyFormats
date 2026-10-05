@@ -93,11 +93,11 @@ public class CountingInputStream extends FilterInputStream {
 	}
 
 	@Override
-	/**
-	 * Reads .
-	 * @return the resulting value
-	 * @throws IOException if the operation cannot be completed
-	 */
+/**
+ * read operation.
+ * @return the resulting value.
+ * @throws IOException if the operation cannot be completed.
+ */
 	public int read() throws IOException {
 		final int b = in.read();
 		afterRead(b != EOF ? 1 : EOF);
@@ -105,12 +105,12 @@ public class CountingInputStream extends FilterInputStream {
 	}
 
 	@Override
-	/**
-	 * Reads .
-	 * @param bts the bts
-	 * @return the resulting value
-	 * @throws IOException if the operation cannot be completed
-	 */
+/**
+ * read operation.
+ * @param bts the bts value.
+ * @return the resulting value.
+ * @throws IOException if the operation cannot be completed.
+ */
 	public int read(final byte[] bts) throws IOException {
 		final int n = in.read(bts);
 		afterRead(n);
@@ -118,14 +118,14 @@ public class CountingInputStream extends FilterInputStream {
 	}
 
 	@Override
-	/**
-	 * Reads .
-	 * @param bts the bts
-	 * @param off the off
-	 * @param len the len
-	 * @return the resulting value
-	 * @throws IOException if the operation cannot be completed
-	 */
+/**
+ * read operation.
+ * @param bts the bts value.
+ * @param off the off value.
+ * @param len the len value.
+ * @return the resulting value.
+ * @throws IOException if the operation cannot be completed.
+ */
 	public int read(final byte[] bts, final int off, final int len) throws IOException {
 		final int n = in.read(bts, off, len);
 		afterRead(n);
@@ -133,12 +133,12 @@ public class CountingInputStream extends FilterInputStream {
 	}
 
 	@Override
-	/**
-	 * Skips the specified amount of input data.
-	 * @param ln the ln
-	 * @return the resulting value
-	 * @throws IOException if the operation cannot be completed
-	 */
+/**
+ * skip operation.
+ * @param ln the ln value.
+ * @return the resulting value.
+ * @throws IOException if the operation cannot be completed.
+ */
 	public long skip(final long ln) throws IOException {
 		final long skipped = in.skip(ln);
 		if (skipped > 0) {
@@ -150,21 +150,20 @@ public class CountingInputStream extends FilterInputStream {
 	}
 
 	@Override
-	/**
-	 * Marks the current input position.
-	 * @param readlimit the readlimit
-	 * @return the resulting value
-	 */
+/**
+ * mark operation.
+ * @param readlimit the readlimit value.
+ */
 	public synchronized void mark(final int readlimit) {
 		in.mark(readlimit);
 		markedCount = count;
 	}
 
 	@Override
-	/**
-	 * Resets the input position to the most recent mark.
-	 * @throws IOException if the operation cannot be completed
-	 */
+/**
+ * reset operation.
+ * @throws IOException if the operation cannot be completed.
+ */
 	public synchronized void reset() throws IOException {
 		in.reset();
 		count = markedCount;

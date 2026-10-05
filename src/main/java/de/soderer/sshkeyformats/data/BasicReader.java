@@ -793,6 +793,9 @@ public class BasicReader implements Closeable {
 	 * Closes this reader and its underlying stream.
 	 */
 	@Override
+/**
+ * close operation.
+ */
 	public void close() {
 		closeQuietly(inputReader);
 		inputReader = null;

@@ -78,6 +78,12 @@ public class SshKeyWriter {
 	 * <br />
 	 * Watchout for PuTTY's key import can only use special characters in passwords, if the ISO-8859-1 encoding is used for passwordAndCommentEncoding.<br />
 	 * But OpenSSH's default encoding is UTF-8<br />
+	 
+	 * @param outputStream the stream receiving the encoded key
+	 * @param sshKey the SSH key to write
+	 * @param passwordChars the optional password used to encrypt the private key
+	 * @param passwordAndCommentEncoding the character encoding for the password and comment, or {@code null} for UTF-8
+	 * @throws Exception if the key cannot be encoded or written
 	 */
 	public static void writeOpenSshv1Key(final OutputStream outputStream, final SshKey sshKey, final char[] passwordChars, Charset passwordAndCommentEncoding) throws Exception {
 		if (passwordAndCommentEncoding == null) {
@@ -329,6 +335,10 @@ public class SshKeyWriter {
 	/**
 	 * Converts this public key into unprotected PEM format (PKCS#1) for OpenSSH keys<br />
 	 * This format includes public key data only and is NOT accepted by PuTTY's key import<br />
+	 
+	 * @param outputStream the stream receiving the encoded key
+	 * @param publicKey the public key to write
+	 * @throws Exception if the key cannot be encoded or written
 	 */
 	public static void writePKCS1Format(final OutputStream outputStream, final PublicKey publicKey) throws Exception {
 		final byte[] publicKeyBytes = KeyPairUtilities.getPublicKeyBytes(publicKey);
@@ -350,6 +360,12 @@ public class SshKeyWriter {
 	 * <br />
 	 * Watchout for PuTTY's key import can only use special characters in passwords, if the ISO-8859-1 encoding is used for passwordEncoding.<br />
 	 * But OpenSSH's default encoding is UTF-8<br />
+	 
+	 * @param outputStream the stream receiving the encoded key
+	 * @param keyPair the key pair to write
+	 * @param passwordChars the optional password used to encrypt the private key
+	 * @param passwordEncoding the character encoding for the password, or {@code null} for UTF-8
+	 * @throws Exception if the key cannot be encoded or written
 	 */
 	public static void writePKCS8Format(final OutputStream outputStream, final KeyPair keyPair, final char[] passwordChars, final Charset passwordEncoding) throws Exception {
 		writePKCS8Format(outputStream, keyPair, null, passwordChars, passwordEncoding);
@@ -369,6 +385,13 @@ public class SshKeyWriter {
 	 * <br />
 	 * Watchout for PuTTY's key import can only use special characters in passwords, if the ISO-8859-1 encoding is used for passwordEncoding.<br />
 	 * But OpenSSH's default encoding is UTF-8<br />
+	 
+	 * @param outputStream the stream receiving the encoded key
+	 * @param keyPair the key pair to write
+	 * @param keyEncryptionCipherName the encryption cipher name, or {@code null} for the default
+	 * @param passwordChars the optional password used to encrypt the private key
+	 * @param passwordEncoding the character encoding for the password, or {@code null} for UTF-8
+	 * @throws Exception if the key cannot be encoded or written
 	 */
 	public static void writePKCS8Format(final OutputStream outputStream, final KeyPair keyPair, String keyEncryptionCipherName, final char[] passwordChars, final Charset passwordEncoding) throws Exception {
 		String keyTypeName;
@@ -452,9 +475,11 @@ public class SshKeyWriter {
 	}
 
 	/**
-	 * Converts this key into unprotected DER format (binary data) for OpenSSH keys<br />
-	 * <br />
-	 * <b>Use with caution, because this key format is not protected by any password</>
+	 * Converts the supplied key pair into unprotected DER format (binary data).
+	 * <p>Use with caution, because this key format is not protected by any password.</p>
+	 * @param outputStream stream receiving the DER encoded key.
+	 * @param keyPair key pair to encode.
+	 * @throws Exception if the key cannot be converted or written.
 	 */
 	public static void writeDerFormat(final OutputStream outputStream, final KeyPair keyPair) throws Exception {
 		final Algorithm algorithm = KeyPairUtilities.getAlgorithm(keyPair);
@@ -505,6 +530,11 @@ public class SshKeyWriter {
 	 * brute-force attacks by modern standards and has been deprecated by OpenSSL itself in favor of
 	 * encrypted PKCS#8. It cannot be strengthened here without breaking compatibility with this
 	 * legacy format; prefer PKCS#8 or OpenSSH v1 encrypted key formats where possible.
+	 
+	 * @param outputStream the stream receiving the encoded key
+	 * @param sshKey the SSH key to write
+	 * @param passwordChars the optional password used to encrypt the private key
+	 * @throws Exception if the key cannot be encoded or written
 	 */
 	private static byte[] stretchPasswordForOpenSsl(final byte[] passwordBytes, final byte[] iv, final int usingIvSize, final int keySize) throws Exception {
 		final MessageDigest hash = MessageDigest.getInstance("MD5");
@@ -616,14 +646,13 @@ public class SshKeyWriter {
 		return dataPadded;
 	}
 
-	/**
-	 * Writes  putty version2 key.
-	 * @param outputStream the output stream
-	 * @param sshKey the ssh key
-	 * @param passwordChars the password chars
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * writePuttyVersion2Key operation.
+ * @param outputStream the outputStream value.
+ * @param sshKey the sshKey value.
+ * @param passwordChars the passwordChars value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static void writePuttyVersion2Key(final OutputStream outputStream, final SshKey sshKey, final char[] passwordChars) throws Exception {
 		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
 			final Algorithm algorithm = sshKey.getAlgorithm();
@@ -690,14 +719,13 @@ public class SshKeyWriter {
 		}
 	}
 
-	/**
-	 * Writes  putty version3 key.
-	 * @param outputStream the output stream
-	 * @param sshKey the ssh key
-	 * @param passwordChars the password chars
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * writePuttyVersion3Key operation.
+ * @param outputStream the outputStream value.
+ * @param sshKey the sshKey value.
+ * @param passwordChars the passwordChars value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static void writePuttyVersion3Key(final OutputStream outputStream, final SshKey sshKey, final char[] passwordChars) throws Exception {
 		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
 			final Algorithm algorithm = sshKey.getAlgorithm();

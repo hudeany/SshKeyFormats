@@ -30,11 +30,15 @@ import java.util.List;
 import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 
 /**
- * Provides functionality for key pair utilities.
+ * KeyPairUtilities API.
  */
 public class KeyPairUtilities {
 	/**
 	 * Create a RSA keypair of given strength
+	 
+	 * @param keyStrength the RSA key size in bits
+	 * @return the generated RSA key pair
+	 * @throws Exception if RSA key pair generation fails
 	 */
 	public static KeyPair createRsaKeyPair(final int keyStrength) throws Exception {
 		if (keyStrength < 512) {
@@ -48,6 +52,9 @@ public class KeyPairUtilities {
 	/**
 	 * Create a DSA keypair of 1024 bit strength<br/>
 	 * Watchout: OpenSSH only supports 1024 bit DSA key strength<br/>
+	 
+	 * @return the generated 1024-bit DSA key pair
+	 * @throws Exception if DSA key pair generation fails
 	 */
 	public static KeyPair createDsaKeyPair() throws Exception {
 		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("DSA");
@@ -58,6 +65,10 @@ public class KeyPairUtilities {
 	/**
 	 * Create a DSA keypair of given strength<br/>
 	 * Watchout: OpenSSH only supports 1024 bit DSA key strength<br/>
+	 
+	 * @param keyStrength the DSA key size in bits
+	 * @return the generated DSA key pair
+	 * @throws Exception if DSA key pair generation fails
 	 */
 	public static KeyPair createDsaKeyPair(final int keyStrength) throws Exception {
 		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("DSA");
@@ -71,6 +82,10 @@ public class KeyPairUtilities {
 	 *   nistp256 or secp256
 	 *   nistp384 or secp384
 	 *   nistp521 or secp521
+	 
+	 * @param ecdsaCurveName the ECDSA curve name
+	 * @return the generated elliptic-curve key pair
+	 * @throws Exception if the curve name is unsupported or key generation fails
 	 */
 	public static KeyPair createEllipticCurveKeyPair(final String ecdsaCurveName) throws Exception {
 		if (ecdsaCurveName == null || "".equals(ecdsaCurveName.trim())) {
@@ -88,12 +103,12 @@ public class KeyPairUtilities {
 		return keyPairGenerator.generateKeyPair();
 	}
 
-	/**
-	 * Creates  elliptic curve key pair.
-	 * @param curveId the curve id
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * createEllipticCurveKeyPair operation.
+ * @param curveId the curveId value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static KeyPair createEllipticCurveKeyPair(final int curveId) throws Exception {
 		if (256 != curveId && 384 != curveId && 521 != curveId) {
 			throw new Exception("Invalid ECDSA curve id parameter");
@@ -103,21 +118,21 @@ public class KeyPairUtilities {
 		return keyPairGenerator.generateKeyPair();
 	}
 
-	/**
-	 * Creates  ed25519 curve key pair.
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * createEd25519CurveKeyPair operation.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static KeyPair createEd25519CurveKeyPair() throws Exception {
 		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("Ed25519");
 		return keyPairGenerator.generateKeyPair();
 	}
 
-	/**
-	 * Creates  ed448 curve key pair.
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * createEd448CurveKeyPair operation.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static KeyPair createEd448CurveKeyPair() throws Exception {
 		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("Ed448");
 		return keyPairGenerator.generateKeyPair();
@@ -128,6 +143,10 @@ public class KeyPairUtilities {
 	 * "ssh-rsa" for RSA key<br />
 	 * "ssh-dss" for DSA key<br />
 	 * "ecdsa-sha2-nistp256" or "ecdsa-sha2-nistp384" or "ecdsa-sha2-nistp521" for ECDSA key<br />
+	 
+	 * @param keyPair the key pair to inspect
+	 * @return the SSH algorithm represented by the key pair
+	 * @throws Exception if the key type is unsupported
 	 */
 	public static Algorithm getAlgorithm(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
@@ -146,6 +165,10 @@ public class KeyPairUtilities {
 	 * "ssh-rsa" for RSA key<br />
 	 * "ssh-dss" for DSA key<br />
 	 * "ecdsa-sha2-nistp256" or "ecdsa-sha2-nistp384" or "ecdsa-sha2-nistp521" for ECDSA key<br />
+	 
+	 * @param publicKey the public key to inspect
+	 * @return the SSH algorithm represented by the public key
+	 * @throws Exception if the key type is unsupported
 	 */
 	public static Algorithm getAlgorithm(final PublicKey publicKey) throws Exception {
 		if (publicKey == null){
@@ -184,6 +207,10 @@ public class KeyPairUtilities {
 	 * "ssh-rsa" for RSA key<br />
 	 * "ssh-dss" for DSA key<br />
 	 * "ecdsa-sha2-nistp256" or "ecdsa-sha2-nistp384" or "ecdsa-sha2-nistp521" for ECDSA key<br />
+	 
+	 * @param privateKey the private key to inspect
+	 * @return the SSH algorithm represented by the private key
+	 * @throws Exception if the key type is unsupported
 	 */
 	public static Algorithm getAlgorithm(final PrivateKey privateKey) throws Exception {
 		if (privateKey == null){
@@ -217,12 +244,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the key strength.
-	 * @param keyPair the key pair
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getKeyStrength operation.
+ * @param keyPair the keyPair value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static int getKeyStrength(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -231,12 +258,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the key strength.
-	 * @param publicKey the public key
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getKeyStrength operation.
+ * @param publicKey the publicKey value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static int getKeyStrength(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
@@ -258,12 +285,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the public key bytes.
-	 * @param publicKey the public key
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getPublicKeyBytes operation.
+ * @param publicKey the publicKey value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static byte[] getPublicKeyBytes(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
@@ -342,12 +369,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the md5 fingerprint.
-	 * @param keyPair the key pair
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getMd5Fingerprint operation.
+ * @param keyPair the keyPair value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getMd5Fingerprint(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -356,12 +383,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the md5 fingerprint.
-	 * @param publicKey the public key
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getMd5Fingerprint operation.
+ * @param publicKey the publicKey value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getMd5Fingerprint(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
@@ -376,12 +403,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha1 fingerprint.
-	 * @param keyPair the key pair
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha1Fingerprint operation.
+ * @param keyPair the keyPair value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha1Fingerprint(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -390,12 +417,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha1 fingerprint.
-	 * @param publicKey the public key
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha1Fingerprint operation.
+ * @param publicKey the publicKey value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha1Fingerprint(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
@@ -410,12 +437,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha1 fingerprint base64.
-	 * @param keyPair the key pair
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha1FingerprintBase64 operation.
+ * @param keyPair the keyPair value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha1FingerprintBase64(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -424,12 +451,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha1 fingerprint base64.
-	 * @param publicKey the public key
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha1FingerprintBase64 operation.
+ * @param publicKey the publicKey value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha1FingerprintBase64(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
@@ -444,12 +471,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha256 fingerprint.
-	 * @param keyPair the key pair
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha256Fingerprint operation.
+ * @param keyPair the keyPair value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha256Fingerprint(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -458,12 +485,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha256 fingerprint.
-	 * @param publicKey the public key
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha256Fingerprint operation.
+ * @param publicKey the publicKey value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha256Fingerprint(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
@@ -478,12 +505,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha256 fingerprint base64.
-	 * @param keyPair the key pair
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha256FingerprintBase64 operation.
+ * @param keyPair the keyPair value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha256FingerprintBase64(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -492,12 +519,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha256 fingerprint base64.
-	 * @param publicKey the public key
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha256FingerprintBase64 operation.
+ * @param publicKey the publicKey value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha256FingerprintBase64(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
@@ -512,12 +539,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha384 fingerprint.
-	 * @param keyPair the key pair
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha384Fingerprint operation.
+ * @param keyPair the keyPair value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha384Fingerprint(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -526,12 +553,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha384 fingerprint.
-	 * @param publicKey the public key
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha384Fingerprint operation.
+ * @param publicKey the publicKey value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha384Fingerprint(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
@@ -546,12 +573,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha384 fingerprint base64.
-	 * @param keyPair the key pair
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha384FingerprintBase64 operation.
+ * @param keyPair the keyPair value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha384FingerprintBase64(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -560,12 +587,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha384 fingerprint base64.
-	 * @param publicKey the public key
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha384FingerprintBase64 operation.
+ * @param publicKey the publicKey value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha384FingerprintBase64(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
@@ -580,12 +607,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha512 fingerprint.
-	 * @param keyPair the key pair
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha512Fingerprint operation.
+ * @param keyPair the keyPair value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha512Fingerprint(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -594,12 +621,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha512 fingerprint.
-	 * @param publicKey the public key
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha512Fingerprint operation.
+ * @param publicKey the publicKey value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha512Fingerprint(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
@@ -614,12 +641,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha512 fingerprint base64.
-	 * @param keyPair the key pair
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha512FingerprintBase64 operation.
+ * @param keyPair the keyPair value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha512FingerprintBase64(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -628,12 +655,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Returns the sha512 fingerprint base64.
-	 * @param publicKey the public key
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha512FingerprintBase64 operation.
+ * @param publicKey the publicKey value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String getSha512FingerprintBase64(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
@@ -648,12 +675,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Encodes  public key for authorized keys.
-	 * @param keyPair the key pair
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * encodePublicKeyForAuthorizedKeys operation.
+ * @param keyPair the keyPair value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String encodePublicKeyForAuthorizedKeys(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -664,12 +691,12 @@ public class KeyPairUtilities {
 		}
 	}
 
-	/**
-	 * Encodes  public key for authorized keys.
-	 * @param publicKey the public key
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * encodePublicKeyForAuthorizedKeys operation.
+ * @param publicKey the publicKey value.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public static String encodePublicKeyForAuthorizedKeys(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");

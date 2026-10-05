@@ -9,23 +9,29 @@ import de.soderer.sshkeyformats.data.KeyPairUtilities;
  * Container for OpenSsh key data
  */
 public class SshKey {
-	/**
-	 * Defines the supported ssh key format values.
-	 */
+/**
+ * SshKeyFormat API.
+ */
 	public enum SshKeyFormat {
+		/** Undefined or unknown key format. */
 		Undefined(""),
+		/** OpenSSL PEM/PKCS#8 key format. */
 		OpenSSL("OpenSSL / PKCS#8"),
+		/** OpenSSH version 1 key format. */
 		OpenSSHv1("OpenSSH Version 1"),
+		/** PuTTY version 2 key format. */
 		Putty2("PuTTY Version 2"),
+		/** PuTTY version 3 key format. */
 		Putty3("PuTTY Version 3"),
+		/** PKCS#1 key format. */
 		PKCS1("PKCS#1");
 
 		private final String displayText;
 
-		/**
-		 * Returns the display text.
-		 * @return the resulting value
-		 */
+/**
+ * getDisplayText operation.
+ * @return the resulting value.
+ */
 		public String getDisplayText() {
 			return displayText;
 		}
@@ -40,7 +46,12 @@ public class SshKey {
 	private KeyPair keyPair;
 
 	/**
-	 * Create a SSH key with given keypair
+	 * Creates an SSH key with the specified format, comment and key pair.
+	 *
+	 * @param format the key format; {@link SshKeyFormat#Undefined} is used when {@code null}
+	 * @param comment the optional key comment
+	 * @param keyPair the key pair, or {@code null} when no key pair is available
+	 * @throws Exception if the supplied key pair uses an unsupported algorithm
 	 */
 	public SshKey(final SshKeyFormat format, final String comment, final KeyPair keyPair) throws Exception {
 		this.format = format == null ? SshKeyFormat.Undefined : format;
@@ -52,8 +63,8 @@ public class SshKey {
 	}
 
 	/**
-	 * Sets  key pair.
-	 * @param keyPair the key pair
+	 * Sets the key pair represented by this SSH key.
+	 * @param keyPair the key pair to set.
 	 */
 	protected void setKeyPair(final KeyPair keyPair) {
 		if (keyPair == null) {
@@ -82,152 +93,152 @@ public class SshKey {
 		}
 	}
 
-	/**
-	 * Returns the algorithm.
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getAlgorithm operation.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public Algorithm getAlgorithm() throws Exception {
 		return KeyPairUtilities.getAlgorithm(keyPair);
 	}
 
-	/**
-	 * Returns the key strength.
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getKeyStrength operation.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public int getKeyStrength() throws Exception {
 		return KeyPairUtilities.getKeyStrength(keyPair);
 	}
 
-	/**
-	 * Returns the format.
-	 * @return the resulting value
-	 */
+/**
+ * getFormat operation.
+ * @return the resulting value.
+ */
 	public SshKeyFormat getFormat() {
 		return format;
 	}
 
-	/**
-	 * Sets  format.
-	 * @param format the format
-	 */
+/**
+ * setFormat operation.
+ * @param format the format value.
+ */
 	public void setFormat(final SshKeyFormat format) {
 		this.format = format == null ? SshKeyFormat.Undefined : format;
 	}
 
-	/**
-	 * Returns this object with  format set to the supplied value.
-	 * @param newFormat the new format
-	 * @return the resulting value
-	 */
+/**
+ * withFormat operation.
+ * @param newFormat the newFormat value.
+ * @return the resulting value.
+ */
 	public SshKey withFormat(final SshKeyFormat newFormat) {
 		setFormat(newFormat);
 		return this;
 	}
 
-	/**
-	 * Returns the comment.
-	 * @return the resulting value
-	 */
+/**
+ * getComment operation.
+ * @return the resulting value.
+ */
 	public String getComment() {
 		return comment;
 	}
 
-	/**
-	 * Sets  comment.
-	 * @param comment the comment
-	 */
+/**
+ * setComment operation.
+ * @param comment the comment value.
+ */
 	public void setComment(final String comment) {
 		this.comment = comment;
 	}
 
-	/**
-	 * Returns this object with  comment set to the supplied value.
-	 * @param newComment the new comment
-	 * @return the resulting value
-	 */
+/**
+ * withComment operation.
+ * @param newComment the newComment value.
+ * @return the resulting value.
+ */
 	public SshKey withComment(final String newComment) {
 		setComment(newComment);
 		return this;
 	}
 
-	/**
-	 * Returns the md5 fingerprint.
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getMd5Fingerprint operation.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public String getMd5Fingerprint() throws Exception {
 		return KeyPairUtilities.getMd5Fingerprint(keyPair);
 	}
 
-	/**
-	 * Returns the sha256 fingerprint.
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha256Fingerprint operation.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public String getSha256Fingerprint() throws Exception {
 		return KeyPairUtilities.getSha256Fingerprint(keyPair);
 	}
 
-	/**
-	 * Returns the sha256 fingerprint base64.
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha256FingerprintBase64 operation.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public String getSha256FingerprintBase64() throws Exception {
 		return KeyPairUtilities.getSha256FingerprintBase64(keyPair);
 	}
 
-	/**
-	 * Returns the sha384 fingerprint.
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha384Fingerprint operation.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public String getSha384Fingerprint() throws Exception {
 		return KeyPairUtilities.getSha384Fingerprint(keyPair);
 	}
 
-	/**
-	 * Returns the sha384 fingerprint base64.
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha384FingerprintBase64 operation.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public String getSha384FingerprintBase64() throws Exception {
 		return KeyPairUtilities.getSha384FingerprintBase64(keyPair);
 	}
 
-	/**
-	 * Returns the sha512 fingerprint.
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha512Fingerprint operation.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public String getSha512Fingerprint() throws Exception {
 		return KeyPairUtilities.getSha512Fingerprint(keyPair);
 	}
 
-	/**
-	 * Returns the sha512 fingerprint base64.
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * getSha512FingerprintBase64 operation.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public String getSha512FingerprintBase64() throws Exception {
 		return KeyPairUtilities.getSha512FingerprintBase64(keyPair);
 	}
 
-	/**
-	 * Returns the key pair.
-	 * @return the resulting value
-	 */
+/**
+ * getKeyPair operation.
+ * @return the resulting value.
+ */
 	public KeyPair getKeyPair() {
 		return keyPair;
 	}
 
-	/**
-	 * Encodes  public key for authorized keys.
-	 * @return the resulting value
-	 * @throws Exception if the operation cannot be completed
-	 */
+/**
+ * encodePublicKeyForAuthorizedKeys operation.
+ * @return the resulting value.
+ * @throws Exception if the operation cannot be completed.
+ */
 	public String encodePublicKeyForAuthorizedKeys() throws Exception {
 		return KeyPairUtilities.encodePublicKeyForAuthorizedKeys(keyPair);
 	}
