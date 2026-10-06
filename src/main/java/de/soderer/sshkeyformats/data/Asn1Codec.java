@@ -160,7 +160,13 @@ public class Asn1Codec {
 				if (nextByte < 0) {
 					throw new Exception("Unexpected end of data while reading DER tag length");
 				}
+				if (i == 0 && nextByte == 0) {
+					throw new Exception("Invalid DER tag length encoding with leading zero");
+				}
 				longTagLength = (longTagLength << 8) + nextByte;
+			}
+			if (longTagLength < 0x80) {
+				throw new Exception("Invalid DER tag length encoding: long form used for length " + longTagLength);
 			}
 			if (longTagLength > MAX_DER_TAG_DATA_LENGTH) {
 				throw new Exception("DER tag length " + longTagLength + " exceeds maximum allowed size of " + MAX_DER_TAG_DATA_LENGTH + " bytes");
@@ -193,7 +199,7 @@ public class Asn1Codec {
  */
 		public DerTag(final int tagId, final byte[] data) {
 			this.tagId = tagId;
-			this.data = data;
+			this.data = data == null ? null : data.clone();
 		}
 
 /**
@@ -217,7 +223,7 @@ public class Asn1Codec {
  * @return the resulting value.
  */
 		public byte[] getData() {
-			return data;
+			return data == null ? null : data.clone();
 		}
 
 /**
@@ -225,7 +231,7 @@ public class Asn1Codec {
  * @param data the data value.
  */
 		public void setData(final byte[] data) {
-			this.data = data;
+			this.data = data == null ? null : data.clone();
 		}
 
 		@Override

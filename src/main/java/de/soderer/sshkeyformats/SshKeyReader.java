@@ -82,6 +82,10 @@ import de.soderer.sshkeyformats.data.WrongPasswordException;
  * <br />
  */
 public class SshKeyReader {
+	/** Maximum encoded key data accepted in a PEM/RFC4716 block. */
+	private static final int MAX_BASE64_ENCODED_DATA_LENGTH = 24 * 1024 * 1024; // 24 MB
+	/** Maximum number of PuTTY data lines accepted for one Public-Lines/Private-Lines section. */
+	private static final int MAX_PUTTY_DATA_LINES = 1024 * 1024;
 	/**
 	 * Sanity upper bound for the bcrypt KDF round count of encrypted OpenSSH v1 private keys, to
 	 * protect against maliciously crafted or corrupted key files that could otherwise force a
@@ -242,12 +246,21 @@ public class SshKeyReader {
 	}
 
 	private static boolean isAuthorizedKeyLine(final String line) {
-		for (final Algorithm algorithm : Algorithm.values()) {
-			if (line.contains(algorithm.getSshAlgorithmId() + " ") || line.contains(algorithm.getSshAlgorithmId() + "\t")) {
-				return true;
-			}
+		if (line == null) {
+			return false;
 		}
-		return false;
+		final String trimmedLine = line.trim();
+		if (trimmedLine.isEmpty() || trimmedLine.startsWith("#")) {
+			return false;
+		}
+		// Parse the complete authorized_keys grammar instead of searching for a key type
+		// anywhere in the line. This also supports valid options before the key type.
+		try {
+			AuthorizedKeyLineParser.parseAuthorizedKeyLine(trimmedLine);
+			return true;
+		} catch (@SuppressWarnings("unused") final Exception e) {
+			return false;
+		}
 	}
 
 	private static boolean isBase64(final String value) {
@@ -795,7 +808,11 @@ public class SshKeyReader {
 				lastHeaderName = nextLine.substring(0, nextLine.indexOf(':')).trim();
 				textBlock.setHeader(lastHeaderName, nextLine.substring(nextLine.indexOf(':') + 1).trim());
 			} else {
-				base64Data.append(nextLine.trim());
+				final String dataLine = nextLine.trim();
+				if ((long) base64Data.length() + dataLine.length() > MAX_BASE64_ENCODED_DATA_LENGTH) {
+					throw new Exception("Corrupt key data found: Base64 key data exceeds maximum allowed size of " + MAX_BASE64_ENCODED_DATA_LENGTH + " characters");
+				}
+				base64Data.append(dataLine);
 			}
 		}
 		throw new Exception("Corrupt key data found: End line is missing: '" + endLine + "'");
@@ -836,6 +853,9 @@ public class SshKeyReader {
 			} else if (nextLine.indexOf(':') > 0) {
 				throw new Exception("Corrupt key data found: Headers found after keydata start");
 			} else {
+				if ((long) base64Data.length() + nextLine.length() > MAX_BASE64_ENCODED_DATA_LENGTH) {
+					throw new Exception("Corrupt key data found: Base64 key data exceeds maximum allowed size of " + MAX_BASE64_ENCODED_DATA_LENGTH + " characters");
+				}
 				base64Data.append(nextLine);
 			}
 		}
@@ -1193,13 +1213,17 @@ public class SshKeyReader {
 					} catch (final NumberFormatException e) {
 						throw new Exception("Corrupt key data found: Invalid value for '" + headerName + "'", e);
 					}
-					if (numberOfLines < 0) {
-						throw new Exception("Corrupt key data found: Invalid value for '" + headerName + "'");
+					if (numberOfLines < 0 || numberOfLines > MAX_PUTTY_DATA_LINES) {
+						throw new Exception("Corrupt key data found: Invalid value for '" + headerName + "' (maximum " + MAX_PUTTY_DATA_LINES + " lines)");
 					}
 					final StringBuilder value = new StringBuilder();
 					for (int i = 0; i < numberOfLines; i++) {
 						if ((nextLine = dataReader.readLine()) != null) {
-							value.append(nextLine.trim());
+							final String dataLine = nextLine.trim();
+							if ((long) value.length() + dataLine.length() > MAX_BASE64_ENCODED_DATA_LENGTH) {
+								throw new Exception("Corrupt key data found: " + headerName + " exceeds maximum allowed size of " + MAX_BASE64_ENCODED_DATA_LENGTH + " characters");
+							}
+							value.append(dataLine);
 						} else {
 							throw new Exception("Corrupt key data found: Missing some lines for '" + headerName + "'");
 						}

@@ -37,7 +37,7 @@ public class Password implements Closeable {
  * @return the resulting value.
  */
 	public char[] getPasswordChars() {
-		return passwordChars;
+		return passwordChars == null ? null : passwordChars.clone();
 	}
 
 /**
@@ -46,9 +46,14 @@ public class Password implements Closeable {
  */
 	public byte[] getPasswordBytesUtfEncoded() {
 		if (passwordBytesUtfEncoded == null) {
+			if (passwordChars == null) {
+				return null;
+			}
 			passwordBytesUtfEncoded = encodeCharArrayToByteArray(passwordChars, StandardCharsets.UTF_8);
 		}
-		return passwordBytesUtfEncoded;
+		final byte[] result = passwordBytesUtfEncoded.clone();
+		sensitiveDataToCleanup.add(result);
+		return result;
 	}
 
 /**
@@ -57,9 +62,14 @@ public class Password implements Closeable {
  */
 	public byte[] getPasswordBytesIsoEncoded() {
 		if (passwordBytesIsoEncoded == null) {
+			if (passwordChars == null) {
+				return null;
+			}
 			passwordBytesIsoEncoded = encodeCharArrayToByteArray(passwordChars, StandardCharsets.ISO_8859_1);
 		}
-		return passwordBytesIsoEncoded;
+		final byte[] result = passwordBytesIsoEncoded.clone();
+		sensitiveDataToCleanup.add(result);
+		return result;
 	}
 
 /**

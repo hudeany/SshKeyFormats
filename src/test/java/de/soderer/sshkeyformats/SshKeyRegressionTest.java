@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.lang.reflect.Method;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -49,6 +51,43 @@ public class SshKeyRegressionTest {
 				assertEquals(0, nextByte);
 			}
 		}
+	}
+
+	@Test
+	public void testPasswordGettersReturnDefensiveCopies() {
+		try (final Password password = new Password("geheim".toCharArray())) {
+			final char[] chars = password.getPasswordChars();
+			chars[0] = 'X';
+			assertEquals('g', password.getPasswordChars()[0]);
+			final byte[] utfBytes = password.getPasswordBytesUtfEncoded();
+			utfBytes[0] = 0;
+			assertEquals('g', password.getPasswordBytesUtfEncoded()[0]);
+		}
+	}
+
+	@Test
+	public void testDerTagUsesDefensiveCopies() throws Exception {
+		final byte[] original = new byte[] { 1, 2, 3 };
+		final DerTag derTag = new DerTag(Asn1Codec.DER_TAG_OCTET_STRING, original);
+		original[0] = 9;
+		assertEquals(1, derTag.getData()[0]);
+		final byte[] returned = derTag.getData();
+		returned[1] = 9;
+		assertEquals(2, derTag.getData()[1]);
+	}
+
+	@Test
+	public void testDerRejectsNonCanonicalLengthEncoding() {
+		assertThrows(Exception.class, () -> Asn1Codec.readDerTag(new byte[] { 0x04, (byte) 0x81, 0x01, 0x01 }));
+		assertThrows(Exception.class, () -> Asn1Codec.readDerTag(new byte[] { 0x04, (byte) 0x82, 0x00, (byte) 0x80 }));
+	}
+
+	@Test
+	public void testAuthorizedKeyDetectionDoesNotUseSubstringMatch() throws Exception {
+		final Method method = SshKeyReader.class.getDeclaredMethod("isAuthorizedKeyLine", String.class);
+		method.setAccessible(true);
+		assertFalse((Boolean) method.invoke(null, "prefix ssh-rsa not-a-key"));
+		assertTrue((Boolean) method.invoke(null, "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ== comment"));
 	}
 
 	@Test
