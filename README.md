@@ -2,31 +2,35 @@
 
 [![Maven Central](https://img.shields.io/maven-central/v/de.soderer/sshkeyformats)](https://central.sonatype.com/artifact/de.soderer/sshkeyformats)
 
-A Java library for **reading, writing and converting SSH key files** in various OpenSSH, PuTTY, OpenSSL / PKCS#8 and PKCS#1 formats.
+A Java library for **reading, writing and converting SSH key files** in the formats of OpenSSH, PuTTY and OpenSSL, including OpenSSH `authorized_keys` files.
 
 ## Features
 
-- **OpenSSH**: read and write OpenSSH version 1 key files
-- **PuTTY**: support for PuTTY Private Key (PPK) format versions 2 and 3
-- **OpenSSL / PKCS#8**: read and write PKCS#8 private keys
-- **PKCS#1**: support for PKCS#1 key encoding
-- **Password protection**: supported where provided by the respective key format
-- **Key conversion**: convert keys between supported formats
-- **Multiple encodings**: supports ISO-8859-1 and UTF-8 where required by the individual formats
-- **RSA, DSA, ECDSA and EdDSA** key algorithms
-- **Ed25519 and Ed448** support with Java 15 or newer
+- **OpenSSH**: read and write private keys in the OpenSSH v1 format (`-----BEGIN OPENSSH PRIVATE KEY-----`) and public keys
+- **authorized_keys**: parse and create `authorized_keys` lines including all OpenSSH options (`command`, `from`, `restrict`, `no-pty`, ...)
+- **PuTTY**: read and write PuTTY private key files (PPK) version 2 and 3
+- **OpenSSL**: read and write traditional PEM keys (`RSA/DSA/EC PRIVATE KEY`), read PKCS#8 keys (`PRIVATE KEY`, `ENCRYPTED PRIVATE KEY`) as written by OpenSSL 3
+- **Public key formats**: OpenSSH public keys, RFC 4716 (`---- BEGIN SSH2 PUBLIC KEY ----`), X.509 (`PUBLIC KEY`) and PKCS#1 (`RSA PUBLIC KEY`)
+- **Password protection**: supported for all private key formats that provide encryption
+- **Key conversion**: convert keys between the supported formats
+- **Fingerprints**: MD5, SHA-256, SHA-384 and SHA-512 fingerprints, hex or Base64 encoded
+- **Key generation**: helper methods for creating new key pairs
+- **RSA, DSA, ECDSA, Ed25519 and Ed448** key algorithms
+- **Robust against malicious input**: sizes and key derivation work factors of read key files are limited
 
 ## Contents
 
 - [Installation](#installation)
+- [Requirements](#requirements)
 - [Supported formats](#supported-formats)
 - [Supported algorithms](#supported-algorithms)
-- [Basic usage](#basic-usage)
 - [Reading a key](#reading-a-key)
 - [Writing a key](#writing-a-key)
 - [Converting between formats](#converting-between-formats)
+- [Public keys and authorized_keys](#public-keys-and-authorized_keys)
+- [Fingerprints](#fingerprints)
 - [Password-protected keys](#password-protected-keys)
-- [Java version](#java-version)
+- [Security notes](#security-notes)
 - [Dependencies](#dependencies)
 - [Main classes](#main-classes)
 
@@ -52,173 +56,232 @@ implementation "de.soderer:sshkeyformats:VERSION"
 
 **Without a build tool**
 
-Download the JAR from the [GitHub releases](https://github.com/hudeany/sshkeyformats/releases).
+Download the JAR from the [GitHub releases](https://github.com/hudeany/sshkeyformats/releases) and add the Bouncy Castle libraries (see [Dependencies](#dependencies)) to the classpath.
+
+## Requirements
+
+**Java 17** or newer.
 
 ## Supported formats
 
-The library supports the following SSH key formats:
+### Private keys
 
-| Format | Read | Write | Password protection |
-|---|:---:|:---:|:---:|
-| OpenSSH version 1 | ✓ | ✓ | ✓ |
-| PuTTY PPK version 2 | ✓ | ✓ | ✓ |
-| PuTTY PPK version 3 | ✓ | ✓ | ✓ |
-| OpenSSL / PKCS#8 | ✓ | ✓ | ✓ |
-| PKCS#1 | ✓ | ✓ | — |
+| Format | PEM type / file header | Read | Write | Encryption |
+|---|---|:---:|:---:|---|
+| OpenSSH v1 | `OPENSSH PRIVATE KEY` | ✓ | ✓ | bcrypt KDF + AES (read: aes128/192/256-ctr and -cbc, write: aes256-ctr) |
+| PuTTY PPK version 3 | `PuTTY-User-Key-File-3` | ✓ | ✓ | Argon2 + AES-256-CBC |
+| PuTTY PPK version 2 | `PuTTY-User-Key-File-2` | ✓ | ✓ | SHA-1 + AES-256-CBC |
+| OpenSSL traditional | `RSA PRIVATE KEY`, `DSA PRIVATE KEY`, `EC PRIVATE KEY` | ✓ | ✓ | legacy PEM encryption (`DEK-Info`): AES-128/192/256-CBC, DES-EDE3-CBC |
+| PKCS#8 | `PRIVATE KEY` | ✓ | ✓ (Ed25519 / Ed448 only) | — |
+| PKCS#8 encrypted | `ENCRYPTED PRIVATE KEY` | ✓ | — | PBES2 with PBKDF2 + AES-CBC or DES-EDE3-CBC |
 
-For OpenSSH and PKCS#8, the library supports the encodings required by PuTTY and `ssh-keygen`, including ISO-8859-1 and UTF-8.
+`SshKeyWriter.writePKCS8Format` writes RSA, DSA and ECDSA keys in the traditional OpenSSL format and Ed25519 / Ed448 keys as PKCS#8, because there is no traditional format for EdDSA keys.
+
+Not supported: encrypted PKCS#8 keys using scrypt, OpenSSH v1 keys encrypted with aes-gcm or chacha20-poly1305, OpenSSH certificates and FIDO keys (`sk-*`).
+
+### Public keys
+
+| Format | Example | Read | Write |
+|---|---|:---:|:---:|
+| OpenSSH public key / authorized_keys line | `ssh-ed25519 AAAA... comment` | ✓ | ✓ |
+| RFC 4716 | `---- BEGIN SSH2 PUBLIC KEY ----` | ✓ | ✓ |
+| X.509 SubjectPublicKeyInfo | `-----BEGIN PUBLIC KEY-----` | ✓ | — |
+| PKCS#1 | `-----BEGIN RSA PUBLIC KEY-----` | ✓ | — |
+
+The reader detects the format automatically. Public key data is also read from all private key formats which store it unencrypted.
 
 ## Supported algorithms
 
-The following key algorithms are supported:
+| Algorithm | SSH key type |
+|---|---|
+| RSA | `ssh-rsa` |
+| DSA | `ssh-dss` |
+| ECDSA nistp256 | `ecdsa-sha2-nistp256` |
+| ECDSA nistp384 | `ecdsa-sha2-nistp384` |
+| ECDSA nistp521 | `ecdsa-sha2-nistp521` |
+| Ed25519 | `ssh-ed25519` |
+| Ed448 | `ssh-ed448` |
 
-- **RSA**
-- **DSA**
-- **ECDSA**
-  - nistp256
-  - nistp384
-  - nistp521
-- **EdDSA**
-  - Ed25519
-  - Ed448
-
-Ed25519 and Ed448 require **Java 15 or newer**.
-
-## Basic usage
-
-The main API consists of:
-
-- `de.soderer.sshkeyformats.SshKeyReader`
-- `de.soderer.sshkeyformats.SshKeyWriter`
-
-A key can be read from an input stream and subsequently written in another supported format.
+DSA keys are supported for reading and converting existing keys. Current OpenSSH versions do not accept DSA keys anymore.
 
 ## Reading a key
 
-Use `SshKeyReader` to read a key from an input stream:
+`SshKeyReader.readKey` reads the first key of an input stream. The format is detected automatically. For unencrypted keys pass `null` as password.
 
 ```java
-final SshKey sshKey = SshKeyReader.readKey(
-	new FileInputStream("test.ppk"),
-	"password".toCharArray()
-);
+final SshKey sshKey;
+try (InputStream inputStream = new FileInputStream("id_ed25519")) {
+	sshKey = SshKeyReader.readKey(inputStream, "password".toCharArray());
+}
+
+System.out.println(sshKey.getFormat());      // e.g. OpenSSHv1
+System.out.println(sshKey.getAlgorithm());   // e.g. ED25519
+System.out.println(sshKey.getKeyStrength()); // e.g. 256
+System.out.println(sshKey.getComment());
 ```
 
-The returned `SshKey` contains the key information and can be passed to the writer for conversion to another format.
-
-For an unprotected key, the password can be omitted or supplied according to the respective reader API.
+The returned `SshKey` contains the `java.security.KeyPair` (`sshKey.getKeyPair()`), which can be used directly with the Java cryptography APIs.
 
 ## Writing a key
 
-The `SshKeyWriter` provides methods for writing keys in the supported formats.
+`SshKeyWriter` writes keys in the supported formats. A password of `null` or an empty password writes an unencrypted key.
 
-For example, a PKCS#8 key can be written as follows:
-
-```java
-SshKeyWriter.writePKCS8Format(
-	new FileOutputStream("test.pem"),
-	sshKey,
-	"password".toCharArray()
-);
-```
-
-Similarly, PuTTY PPK files can be generated from a `KeyPair`:
+Create a new key pair and write it in the OpenSSH format like `ssh-keygen` does:
 
 ```java
-final KeyPairGenerator keyPairGenerator =
-	KeyPairGenerator.getInstance("RSA");
+final KeyPair keyPair = KeyPairUtilities.createEd25519CurveKeyPair();
+final SshKey sshKey = new SshKey(SshKeyFormat.OpenSSHv1, "user@host", keyPair);
 
-keyPairGenerator.initialize(4096);
+try (OutputStream outputStream = new FileOutputStream("id_ed25519")) {
+	SshKeyWriter.writeOpenSshv1Key(outputStream, sshKey, "password".toCharArray(), null);
+}
 
-final KeyPair keyPair = keyPairGenerator.generateKeyPair();
-
-final SshKey sshKey =
-	new SshKey(SshKeyFormat.Putty2, "TestKey", keyPair);
-
-SshKeyWriter.writePuttyVersion2Key(
-	new FileOutputStream("test.ppk"),
-	sshKey,
-	"password".toCharArray()
-);
+try (OutputStream outputStream = new FileOutputStream("id_ed25519.pub")) {
+	outputStream.write((sshKey.encodePublicKeyForAuthorizedKeys() + " " + sshKey.getComment() + "\n").getBytes(StandardCharsets.UTF_8));
+}
 ```
+
+The writer methods:
+
+| Method | Output |
+|---|---|
+| `writeOpenSshv1Key(outputStream, sshKey, password, passwordAndCommentEncoding)` | OpenSSH v1 private key |
+| `writePuttyVersion3Key(outputStream, sshKey, password)` | PuTTY PPK version 3 |
+| `writePuttyVersion2Key(outputStream, sshKey, password)` | PuTTY PPK version 2 |
+| `writePKCS8Format(outputStream, keyPair, password, passwordEncoding)` | OpenSSL traditional PEM (Ed25519 / Ed448: PKCS#8), encrypted with AES-128-CBC |
+| `writePKCS8Format(outputStream, keyPair, cipherName, password, passwordEncoding)` | as above with cipher `AES-128-CBC`, `AES-192-CBC`, `AES-256-CBC` or `DES-EDE3-CBC` |
+| `writeDerFormat(outputStream, keyPair)` | unencrypted binary DER |
+| `writePKCS1Format(outputStream, publicKey)` | RFC 4716 public key (`---- BEGIN SSH2 PUBLIC KEY ----`) |
+
+The encoding parameters default to UTF-8 when `null` is passed.
 
 ## Converting between formats
 
-Because the reader and writer operate on the common `SshKey` representation, keys can be converted between the supported formats.
+Because reader and writer operate on the common `SshKey` representation, keys can be converted between all supported formats.
 
-For example, a PuTTY PPK key can be read and written as a PKCS#8 PEM key:
-
-```java
-final SshKey readSshKey = SshKeyReader.readKey(
-	new FileInputStream("test.ppk"),
-	"password".toCharArray()
-);
-
-SshKeyWriter.writePKCS8Format(
-	new FileOutputStream("test.pem"),
-	readSshKey,
-	"password".toCharArray()
-);
-```
-
-This makes `SshKeyFormats` useful not only as a reader and writer, but also as a **key format converter**.
-
-## Password-protected keys
-
-Password protection is supported for the formats that provide encrypted private-key storage.
-
-For example:
+For example, convert an OpenSSH key to a PuTTY key:
 
 ```java
 final char[] password = "password".toCharArray();
 
-final SshKey sshKey = SshKeyReader.readKey(
-	new FileInputStream("test.ppk"),
-	password
-);
+final SshKey sshKey;
+try (InputStream inputStream = new FileInputStream("id_ed25519")) {
+	sshKey = SshKeyReader.readKey(inputStream, password);
+}
+
+try (OutputStream outputStream = new FileOutputStream("id_ed25519.ppk")) {
+	SshKeyWriter.writePuttyVersion3Key(outputStream, sshKey, password);
+}
 ```
 
-The password is passed as a `char[]` rather than a `String`, allowing applications to clear the password from memory when it is no longer needed.
+Or write a key in the OpenSSL PEM format with AES-256 encryption:
 
-## Java version
+```java
+try (OutputStream outputStream = new FileOutputStream("key.pem")) {
+	SshKeyWriter.writePKCS8Format(outputStream, sshKey.getKeyPair(), "AES-256-CBC", password, null);
+}
+```
 
-The project is basically a **Java 11** project.
+## Public keys and authorized_keys
 
-Support for **Ed25519** and **Ed448** requires **Java 15 or newer**, because these algorithms depend on cryptographic functionality available from that Java version onward.
+`SshKeyReader.readAllPublicKeys` reads all public keys of an input stream, for example an `authorized_keys` file or a file with several public keys. Empty lines and comment lines (`#`) are skipped. Private keys contribute their public key, if it is stored unencrypted. No password is needed.
+
+```java
+final List<SshKey> publicKeys;
+try (InputStream inputStream = new FileInputStream(System.getProperty("user.home") + "/.ssh/authorized_keys")) {
+	publicKeys = SshKeyReader.readAllPublicKeys(inputStream);
+}
+
+for (final SshKey publicKey : publicKeys) {
+	System.out.println(publicKey.getAlgorithm() + " " + publicKey.getSha256FingerprintBase64() + " " + publicKey.getComment());
+	if (publicKey instanceof AuthorizedKey) {
+		final AuthorizedKey authorizedKey = (AuthorizedKey) publicKey;
+		System.out.println("  command: " + authorizedKey.getCommand() + ", no-pty: " + authorizedKey.isNoPty());
+	}
+}
+```
+
+Lines of `authorized_keys` files are returned as `AuthorizedKey`, which provides all options of the OpenSSH syntax as specified in `sshd(8)`: options are separated by commas, values are enclosed in double quotes. Unknown options are rejected, like `sshd` does.
+
+An `authorized_keys` line can also be created or modified:
+
+```java
+final AuthorizedKey authorizedKey = AuthorizedKeyLineParser.parseAuthorizedKeyLine("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX deploy key")
+	.withRestrict(true)
+	.withCommand("/usr/local/bin/deploy")
+	.withFromList("10.0.0.0/8");
+authorizedKey.setEnvironmentValue("DEPLOY_ENV", "production");
+
+System.out.println(authorizedKey.toAuthorizedKeysLine());
+// restrict,command="/usr/local/bin/deploy",environment="DEPLOY_ENV=production",from="10.0.0.0/8" ssh-ed25519 AAAA... deploy key
+```
+
+Use `toAuthorizedKeysLine()` to write `authorized_keys` files. `toString()` only returns key type, key data and comment without the options.
+
+`environment` options only take effect, if `PermitUserEnvironment` is enabled in the `sshd_config` of the server.
+
+## Fingerprints
+
+```java
+sshKey.getSha256FingerprintBase64(); // like "ssh-keygen -l" without the "SHA256:" prefix, but with Base64 padding
+sshKey.getSha256Fingerprint();       // hex, colon separated
+sshKey.getMd5Fingerprint();          // hex, colon separated, upper case
+```
+
+SHA-384 and SHA-512 fingerprints are also available. `KeyPairUtilities` provides the same methods for `KeyPair` and `PublicKey` objects, including SHA-1 fingerprints.
+
+## Password-protected keys
+
+Passwords are passed as `char[]` instead of `String`, so that applications can clear them from memory after use. The library works on internal copies and clears them after use.
+
+A missing or wrong password is reported by `de.soderer.sshkeyformats.data.WrongPasswordException`:
+
+```java
+try (InputStream inputStream = new FileInputStream("id_ed25519")) {
+	sshKey = SshKeyReader.readKey(inputStream, password);
+} catch (final WrongPasswordException e) {
+	// ask the user for the password again
+}
+```
+
+**Password encoding:** `ssh-keygen` and OpenSSL encode passwords in UTF-8, PuTTY on Windows uses ISO-8859-1 (Windows codepage). When reading, the library tries both encodings, so keys of both tools can be read with passwords containing special characters. When writing, the encoding can be chosen for OpenSSH and OpenSSL keys. PuTTY keys are always written with ISO-8859-1 password encoding.
+
+## Security notes
+
+- **Prefer OpenSSH v1 or PuTTY PPK version 3 for new encrypted keys.** These formats use the work factor based key derivation functions bcrypt and Argon2.
+- The legacy PEM encryption of traditional OpenSSL keys (`DEK-Info`) derives the key with a single MD5 round and is weak against brute force attacks. It is supported for compatibility only.
+- PuTTY PPK version 2 uses a single SHA-1 round for key derivation. Prefer version 3.
+- The reader is designed to process untrusted input: line lengths, data sizes, the number of headers and the work factors of key derivation functions (bcrypt rounds, PBKDF2 iterations, Argon2 memory and passes) are limited, so that malicious key files cannot exhaust memory or CPU. Key files exceeding these limits are rejected with an exception.
+- `readAllPublicKeys` returns all keys of the input. Limit the size of the input stream, if it comes from an untrusted source.
 
 ## Dependencies
 
-The project uses **Bouncy Castle** for functionality that is not provided directly by the Java runtime.
+The project uses **Bouncy Castle** for functionality that is not provided by the Java runtime:
 
-Bouncy Castle is used for:
-
-- ECDSA key factory functionality
-- Argon2 password derivation required by PuTTY PPK version 3
-
-The project currently uses:
+- ECDSA key handling and point validation
+- Argon2 key derivation for PuTTY PPK version 3
+- Derivation of Ed25519 / Ed448 public keys from PKCS#8 private keys
 
 ```text
-org.bouncycastle:bcpkix-jdk18on
 org.bouncycastle:bcprov-jdk18on
+org.bouncycastle:bcpkix-jdk18on
 ```
 
 ## Main classes
 
-### `SshKeyReader`
-
-`de.soderer.sshkeyformats.SshKeyReader`
-
-Responsible for reading supported SSH key formats and creating the common `SshKey` representation.
-
-### `SshKeyWriter`
-
-`de.soderer.sshkeyformats.SshKeyWriter`
-
-Responsible for writing an `SshKey` to one of the supported output formats.
+| Class | Purpose |
+|---|---|
+| `de.soderer.sshkeyformats.SshKeyReader` | Reads keys of all supported formats into `SshKey` objects |
+| `de.soderer.sshkeyformats.SshKeyWriter` | Writes `SshKey` / `KeyPair` objects in the supported formats |
+| `de.soderer.sshkeyformats.SshKey` | Common key representation: format, comment, `KeyPair`, fingerprints |
+| `de.soderer.sshkeyformats.AuthorizedKey` | `SshKey` with the options of an `authorized_keys` line |
+| `de.soderer.sshkeyformats.data.AuthorizedKeyLineParser` | Parser for single `authorized_keys` lines |
+| `de.soderer.sshkeyformats.data.KeyPairUtilities` | Key generation, fingerprints, key algorithm and strength detection |
+| `de.soderer.sshkeyformats.data.WrongPasswordException` | Signals a missing or wrong password |
 
 ## License
 
-See the project repository for licensing information.
+See [LICENSE.txt](LICENSE.txt).
 
 ## Source code
 
