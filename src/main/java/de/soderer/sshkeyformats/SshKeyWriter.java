@@ -34,8 +34,6 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
-import org.bouncycastle.jce.ECNamedCurveTable;
-
 import de.soderer.sshkeyformats.data.Algorithm;
 import de.soderer.sshkeyformats.data.Asn1Codec;
 import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
@@ -190,9 +188,13 @@ public class SshKeyWriter {
 				final String ecCurveName = CryptographicUtilities.getEcDsaEllipticCurveName(publicKeyEC);
 				privateKeyWriter.writeData(("ecdsa-sha2-" + ecCurveName).getBytes(StandardCharsets.UTF_8));
 				privateKeyWriter.writeData((ecCurveName).getBytes(StandardCharsets.UTF_8));
-				final org.bouncycastle.jce.spec.ECNamedCurveParameterSpec ecSpec = ECNamedCurveTable.getParameterSpec(ecCurveName.replace("nist", "sec") + "r1");
-				final org.bouncycastle.math.ec.ECPoint point = ecSpec.getCurve().createPoint(publicKeyEC.getW().getAffineX(), publicKeyEC.getW().getAffineY());
-				final byte[] eccKeyBlobBytes = point.getEncoded(false);
+				final int coordinateLength = (publicKeyEC.getParams().getCurve().getField().getFieldSize() + 7) / 8;
+				final byte[] eccKeyBlobBytes = new byte[1 + 2 * coordinateLength];
+				eccKeyBlobBytes[0] = 0x04;
+				final byte[] x = toFixedLength(publicKeyEC.getW().getAffineX(), coordinateLength);
+				final byte[] y = toFixedLength(publicKeyEC.getW().getAffineY(), coordinateLength);
+				System.arraycopy(x, 0, eccKeyBlobBytes, 1, coordinateLength);
+				System.arraycopy(y, 0, eccKeyBlobBytes, 1 + coordinateLength, coordinateLength);
 				privateKeyWriter.writeData(eccKeyBlobBytes);
 				privateKeyWriter.writeBigInt(privateKeyEC.getS());
 			} else if (sshKey.getKeyPair().getPrivate() instanceof EdECPrivateKey) {
@@ -893,4 +895,13 @@ public class SshKeyWriter {
 			return passwordChars.clone();
 		}
 	}
+	private static byte[] toFixedLength(final BigInteger value, final int length) {
+		final byte[] source = value.toByteArray();
+		final byte[] result = new byte[length];
+		final int sourceOffset = source.length > length ? source.length - length : 0;
+		final int copyLength = Math.min(source.length, length);
+		System.arraycopy(source, sourceOffset, result, length - copyLength, copyLength);
+		return result;
+	}
+
 }

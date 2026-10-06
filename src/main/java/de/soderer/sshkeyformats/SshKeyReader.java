@@ -13,6 +13,7 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.security.AlgorithmParameters;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.MessageDigest;
@@ -25,6 +26,11 @@ import java.security.spec.DSAPublicKeySpec;
 import java.security.spec.EdECPoint;
 import java.security.spec.EdECPrivateKeySpec;
 import java.security.spec.EdECPublicKeySpec;
+import java.security.spec.ECParameterSpec;
+import java.security.spec.ECPoint;
+import java.security.spec.ECPrivateKeySpec;
+import java.security.spec.ECPublicKeySpec;
+import java.security.spec.ECGenParameterSpec;
 import java.security.spec.NamedParameterSpec;
 import java.security.spec.RSAPrivateCrtKeySpec;
 import java.security.spec.RSAPublicKeySpec;
@@ -1147,21 +1153,39 @@ public class SshKeyReader {
 		return ECNamedCurveTable.getParameterSpec(nistCurveName.replace("nist", "sec") + "r1");
 	}
 
+	private static ECParameterSpec getJdkEcCurveSpec(final String nistCurveName) throws Exception {
+		if (!"nistp256".equals(nistCurveName) && !"nistp384".equals(nistCurveName) && !"nistp521".equals(nistCurveName)) {
+			throw new Exception("Unsupported ECDSA curveName: " + nistCurveName);
+		}
+		final AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
+		parameters.init(new ECGenParameterSpec(nistCurveName.replace("nist", "sec") + "r1"));
+		return parameters.getParameterSpec(ECParameterSpec.class);
+	}
+
 	/**
-	 * Creates an EC public key from its uncompressed or compressed point encoding. The point is validated to be on the curve.
+	 * Creates an EC public key from the SSH uncompressed point encoding using the JDK EC implementation.
 	 */
 	static PublicKey createEcPublicKey(final byte[] pointEncoding, final String nistCurveName) throws Exception {
-		final ECNamedCurveParameterSpec ecSpec = getEcCurveSpec(nistCurveName);
-		final org.bouncycastle.math.ec.ECPoint point = ecSpec.getCurve().decodePoint(pointEncoding);
-		return KeyFactory.getInstance("EC", BC_PROVIDER).generatePublic(new org.bouncycastle.jce.spec.ECPublicKeySpec(point, ecSpec));
+		final ECParameterSpec ecSpec = getJdkEcCurveSpec(nistCurveName);
+		if (pointEncoding == null || pointEncoding.length < 3 || pointEncoding[0] != 0x04) {
+			throw new Exception("Unsupported or invalid EC point encoding");
+		}
+		final int coordinateLength = (ecSpec.getCurve().getField().getFieldSize() + 7) / 8;
+		if (pointEncoding.length != 1 + 2 * coordinateLength) {
+			throw new Exception("Invalid EC point length");
+		}
+		final byte[] xBytes = Arrays.copyOfRange(pointEncoding, 1, 1 + coordinateLength);
+		final byte[] yBytes = Arrays.copyOfRange(pointEncoding, 1 + coordinateLength, pointEncoding.length);
+		final ECPoint point = new ECPoint(new BigInteger(1, xBytes), new BigInteger(1, yBytes));
+		return KeyFactory.getInstance("EC").generatePublic(new ECPublicKeySpec(point, ecSpec));
 	}
 
 	static PrivateKey createEcPrivateKey(final BigInteger s, final String nistCurveName) throws Exception {
-		final ECNamedCurveParameterSpec ecSpec = getEcCurveSpec(nistCurveName);
-		if (s.signum() <= 0 || s.compareTo(ecSpec.getN()) >= 0) {
+		final ECParameterSpec ecSpec = getJdkEcCurveSpec(nistCurveName);
+		if (s.signum() <= 0 || s.compareTo(ecSpec.getOrder()) >= 0) {
 			throw new Exception("Invalid EC private key value (not in interval [1, n - 1])");
 		}
-		return KeyFactory.getInstance("EC", BC_PROVIDER).generatePrivate(new org.bouncycastle.jce.spec.ECPrivateKeySpec(s, ecSpec));
+		return KeyFactory.getInstance("EC").generatePrivate(new ECPrivateKeySpec(s, ecSpec));
 	}
 
 	private static PublicKey deriveEcPublicKey(final BigInteger s, final String nistCurveName) throws Exception {

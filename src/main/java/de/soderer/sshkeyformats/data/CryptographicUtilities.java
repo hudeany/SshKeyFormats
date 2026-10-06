@@ -10,6 +10,7 @@ import java.io.StringWriter;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.security.Key;
 import java.security.KeyFactory;
 import java.security.KeyPair;
@@ -64,6 +65,9 @@ import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 import java.util.zip.ZipFile;
 
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
+
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
 import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
@@ -74,10 +78,7 @@ import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cms.CMSAlgorithm;
 import org.bouncycastle.crypto.AsymmetricCipherKeyPair;
-import org.bouncycastle.crypto.PBEParametersGenerator;
-import org.bouncycastle.crypto.generators.PKCS5S2ParametersGenerator;
 import org.bouncycastle.crypto.params.AsymmetricKeyParameter;
-import org.bouncycastle.crypto.params.KeyParameter;
 import org.bouncycastle.crypto.params.RSAKeyParameters;
 import org.bouncycastle.crypto.params.RSAPrivateCrtKeyParameters;
 import org.bouncycastle.crypto.util.PrivateKeyFactory;
@@ -255,10 +256,8 @@ public class CryptographicUtilities {
  * @throws Exception if the operation cannot be completed.
  */
 	public static KeyPair generateRsaKeyPair(final int keyStrength) throws Exception {
-		Security.addProvider(new BouncyCastleProvider());
-
 		try {
-			final KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA", BouncyCastleProvider.PROVIDER_NAME);
+			final KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
 			keyGen.initialize(keyStrength, new SecureRandom());
 			return keyGen.generateKeyPair();
 		} catch (final Exception e) {
@@ -273,10 +272,8 @@ public class CryptographicUtilities {
  * @throws Exception if the operation cannot be completed.
  */
 	public static KeyPair generateDsaKeyPair(final int keyStrength) throws Exception {
-		Security.addProvider(new BouncyCastleProvider());
-
 		try {
-			final KeyPairGenerator keyGen = KeyPairGenerator.getInstance("DSA", BouncyCastleProvider.PROVIDER_NAME);
+			final KeyPairGenerator keyGen = KeyPairGenerator.getInstance("DSA");
 			keyGen.initialize(keyStrength, new SecureRandom());
 			return keyGen.generateKeyPair();
 		} catch (final Exception e) {
@@ -291,10 +288,8 @@ public class CryptographicUtilities {
  * @throws Exception if the operation cannot be completed.
  */
 	public static KeyPair generateDhKeyPair(final int keyStrength) throws Exception {
-		Security.addProvider(new BouncyCastleProvider());
-
 		try {
-			final KeyPairGenerator keyGen = KeyPairGenerator.getInstance("DH", BouncyCastleProvider.PROVIDER_NAME);
+			final KeyPairGenerator keyGen = KeyPairGenerator.getInstance("DH");
 			keyGen.initialize(keyStrength, new SecureRandom());
 			return keyGen.generateKeyPair();
 		} catch (final Exception e) {
@@ -313,10 +308,8 @@ public class CryptographicUtilities {
 			throw new Exception("Missing EC curve name parameter");
 		}
 
-		Security.addProvider(new BouncyCastleProvider());
-
 		try {
-			final KeyPairGenerator keyGen = KeyPairGenerator.getInstance("EC", BouncyCastleProvider.PROVIDER_NAME);
+			final KeyPairGenerator keyGen = KeyPairGenerator.getInstance("EC");
 			final ECGenParameterSpec ecGenParameterSpec = new ECGenParameterSpec(ecCurveName);
 			keyGen.initialize(ecGenParameterSpec, new SecureRandom());
 			return keyGen.generateKeyPair();
@@ -349,12 +342,8 @@ public class CryptographicUtilities {
  * @throws Exception if the operation cannot be completed.
  */
 	public static KeyPair generateEd25519KeyPair() throws Exception {
-		Security.addProvider(new BouncyCastleProvider());
-
 		try {
-			final KeyPairGenerator keyGen = KeyPairGenerator.getInstance("ED25519", BouncyCastleProvider.PROVIDER_NAME);
-			final ECGenParameterSpec ecGenParameterSpec = new ECGenParameterSpec("ED25519");
-			keyGen.initialize(ecGenParameterSpec, new SecureRandom());
+			final KeyPairGenerator keyGen = KeyPairGenerator.getInstance("Ed25519");
 			return keyGen.generateKeyPair();
 		} catch (final Exception e) {
 			throw new Exception("Cannot create EC keypair", e);
@@ -367,12 +356,8 @@ public class CryptographicUtilities {
  * @throws Exception if the operation cannot be completed.
  */
 	public static KeyPair generateEd448KeyPair() throws Exception {
-		Security.addProvider(new BouncyCastleProvider());
-
 		try {
-			final KeyPairGenerator keyGen = KeyPairGenerator.getInstance("ED448", BouncyCastleProvider.PROVIDER_NAME);
-			final ECGenParameterSpec ecGenParameterSpec = new ECGenParameterSpec("ED448");
-			keyGen.initialize(ecGenParameterSpec, new SecureRandom());
+			final KeyPairGenerator keyGen = KeyPairGenerator.getInstance("Ed448");
 			return keyGen.generateKeyPair();
 		} catch (final Exception e) {
 			throw new Exception("Cannot create EC keypair", e);
@@ -386,15 +371,7 @@ public class CryptographicUtilities {
  * @throws Exception if the operation cannot be completed.
  */
 	public static String getStringFromX509Certificate(final X509Certificate certificate) throws Exception {
-		Security.addProvider(new BouncyCastleProvider());
-
-		final StringWriter stringWriter = new StringWriter();
-		try (JcaPEMWriter pemWriter = new JcaPEMWriter(stringWriter)) {
-			pemWriter.writeObject(certificate);
-		} catch (final Exception e) {
-			throw new Exception("Cannot create certificate string: " + e.getMessage(), e);
-		}
-		return stringWriter.toString();
+		return pemEncode("CERTIFICATE", certificate.getEncoded());
 	}
 
 /**
@@ -447,15 +424,7 @@ public class CryptographicUtilities {
  * @throws Exception if the operation cannot be completed.
  */
 	public static String getStringFromKey(final PublicKey publicKey) throws Exception {
-		Security.addProvider(new BouncyCastleProvider());
-
-		final StringWriter stringWriter = new StringWriter();
-		try (JcaPEMWriter pemWriter = new JcaPEMWriter(stringWriter)) {
-			pemWriter.writeObject(publicKey);
-		} catch (final Exception e) {
-			throw new Exception("Cannot create public key string: " + e.getMessage(), e);
-		}
-		return stringWriter.toString();
+		return pemEncode("PUBLIC KEY", publicKey.getEncoded());
 	}
 
 /**
@@ -469,13 +438,7 @@ public class CryptographicUtilities {
 		Security.addProvider(new BouncyCastleProvider());
 
 		if (password == null || password.length == 0) {
-			final StringWriter stringWriter = new StringWriter();
-			try (JcaPEMWriter pemWriter = new JcaPEMWriter(stringWriter)) {
-				pemWriter.writeObject(privateKey);
-			} catch (final Exception e) {
-				throw new Exception("Cannot create private key string: " + e.getMessage(), e);
-			}
-			return stringWriter.toString();
+			return pemEncode("PRIVATE KEY", privateKey.getEncoded());
 		} else {
 			final StringWriter stringWriter = new StringWriter();
 			try (JcaPEMWriter pemWriter = new JcaPEMWriter(stringWriter)) {
@@ -489,6 +452,11 @@ public class CryptographicUtilities {
 			}
 			return stringWriter.toString();
 		}
+	}
+
+	private static String pemEncode(final String type, final byte[] encoded) {
+		final String base64 = Base64.getMimeEncoder(64, "\n".getBytes(StandardCharsets.US_ASCII)).encodeToString(encoded);
+		return "-----BEGIN " + type + "-----\n" + base64 + "\n-----END " + type + "-----\n";
 	}
 
 	/**
@@ -665,12 +633,16 @@ public class CryptographicUtilities {
 			throw new IllegalArgumentException("Invalid iterations value: " + iterations);
 		}
 
-		Security.addProvider(new BouncyCastleProvider());
-
-		final PBEParametersGenerator generator = new PKCS5S2ParametersGenerator();
-		generator.init(PBEParametersGenerator.PKCS5PasswordToUTF8Bytes(password), salt, iterations);
-		final KeyParameter params = (KeyParameter) generator.generateDerivedParameters(keyLength);
-		return params.getKey();
+		try {
+			final PBEKeySpec spec = new PBEKeySpec(password, salt, iterations, keyLength * 8);
+			try {
+				return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1").generateSecret(spec).getEncoded();
+			} finally {
+				spec.clearPassword();
+			}
+		} catch (final Exception e) {
+			throw new IllegalArgumentException("Cannot derive key using PBKDF2", e);
+		}
 	}
 
 	/**
