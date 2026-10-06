@@ -1,6 +1,5 @@
 package de.soderer.sshkeyformats;
 
-import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -84,6 +83,12 @@ import de.soderer.sshkeyformats.data.WrongPasswordException;
 public class SshKeyReader {
 	/** Maximum encoded key data accepted in a PEM/RFC4716 block. */
 	private static final int MAX_BASE64_ENCODED_DATA_LENGTH = 24 * 1024 * 1024; // 24 MB
+	/** Maximum length of a single input line in characters (an authorized_keys line of a RSA-16384 key has about 3 KB). */
+	static final int MAX_LINE_LENGTH = 1024 * 1024;
+	/** Maximum number of header lines accepted in a PEM, RFC 4716 or PuTTY key. */
+	static final int MAX_HEADER_COUNT = 64;
+	/** Maximum length of a single header value including all continuation lines. */
+	static final int MAX_HEADER_VALUE_LENGTH = 64 * 1024;
 	/** Maximum number of PuTTY data lines accepted for one Public-Lines/Private-Lines section. */
 	private static final int MAX_PUTTY_DATA_LINES = 1024 * 1024;
 	/**
@@ -151,7 +156,7 @@ public class SshKeyReader {
 	 * @throws Exception if the input cannot be parsed
 	 */
 	public static List<SshKey> readAllPublicKeys(final InputStream inputStream) throws Exception {
-		try (final BufferedReader dataReader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.ISO_8859_1))) {
+		try (final LimitedLineReader dataReader = new LimitedLineReader(new InputStreamReader(inputStream, StandardCharsets.ISO_8859_1), MAX_LINE_LENGTH)) {
 			final List<SshKey> keyList = new ArrayList<>();
 			SshKey nextKey;
 			while ((nextKey = readNextKey(dataReader, null, true)) != null) {
@@ -173,7 +178,7 @@ public class SshKeyReader {
 	 * @throws Exception if the input cannot be parsed or the password is incorrect
 	 */
 	public static SshKey readKey(final InputStream inputStream, final char[] passwordChars) throws Exception {
-		try (final BufferedReader dataReader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.ISO_8859_1))) {
+		try (final LimitedLineReader dataReader = new LimitedLineReader(new InputStreamReader(inputStream, StandardCharsets.ISO_8859_1), MAX_LINE_LENGTH)) {
 			return readNextKey(dataReader, passwordChars, false);
 		}
 	}
@@ -185,7 +190,7 @@ public class SshKeyReader {
 	 *
 	 * @return the next key or {@code null} at the end of the input
 	 */
-	private static SshKey readNextKey(final BufferedReader dataReader, final char[] passwordChars, final boolean publicKeyOnly) throws Exception {
+	private static SshKey readNextKey(final LimitedLineReader dataReader, final char[] passwordChars, final boolean publicKeyOnly) throws Exception {
 		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
 			while (true) {
 				final String nextLine = readNextContentLine(dataReader);
@@ -212,17 +217,17 @@ public class SshKeyReader {
 					final Map<String, String> keyProperties = readPuttyKeyProperties(dataReader);
 					keyProperties.put("PuTTY-User-Key-File", nextLine.substring(nextLine.indexOf(':') + 1).trim());
 					sshKey = readPuttyKey(puttyVersion, keyProperties, password, publicKeyOnly);
-				} else if (isAuthorizedKeyLine(nextLine)) {
+				} else if (isBase64(nextLine)) {
+					sshKey = new SshKey(SshKeyFormat.OpenSSL, null, new KeyPair(parsePublicKeyBytes(Base64.getDecoder().decode(nextLine)), null));
+				} else {
+					// Everything else must be an authorized_keys line (OpenSSH public key with optional options and comment).
+					// Parse errors are reported with the detailed message of the parser.
 					final AuthorizedKey authorizedKey = AuthorizedKeyLineParser.parseAuthorizedKeyLine(nextLine);
 					authorizedKey.setKeyPair(new KeyPair(parsePublicKeyBytes(Base64.getDecoder().decode(authorizedKey.getKeyString())), null));
 					if (authorizedKey.getKeyType() != authorizedKey.getAlgorithm()) {
 						throw new Exception("AuthorizedKey keytype mismatch for authorizedKey line \"" + nextLine + "\". Public keys keytype is " + authorizedKey.getAlgorithm());
 					}
 					sshKey = authorizedKey;
-				} else if (isBase64(nextLine)) {
-					sshKey = new SshKey(SshKeyFormat.OpenSSL, null, new KeyPair(parsePublicKeyBytes(Base64.getDecoder().decode(nextLine)), null));
-				} else {
-					throw new Exception("No keydata found");
 				}
 
 				if (sshKey != null) {
@@ -233,7 +238,7 @@ public class SshKeyReader {
 		}
 	}
 
-	private static String readNextContentLine(final BufferedReader dataReader) throws IOException {
+	private static String readNextContentLine(final LimitedLineReader dataReader) throws IOException {
 		String nextLine;
 		while ((nextLine = dataReader.readLine()) != null) {
 			nextLine = nextLine.trim();
@@ -243,24 +248,6 @@ public class SshKeyReader {
 			}
 		}
 		return null;
-	}
-
-	private static boolean isAuthorizedKeyLine(final String line) {
-		if (line == null) {
-			return false;
-		}
-		final String trimmedLine = line.trim();
-		if (trimmedLine.isEmpty() || trimmedLine.startsWith("#")) {
-			return false;
-		}
-		// Parse the complete authorized_keys grammar instead of searching for a key type
-		// anywhere in the line. This also supports valid options before the key type.
-		try {
-			AuthorizedKeyLineParser.parseAuthorizedKeyLine(trimmedLine);
-			return true;
-		} catch (@SuppressWarnings("unused") final Exception e) {
-			return false;
-		}
 	}
 
 	private static boolean isBase64(final String value) {
@@ -317,7 +304,7 @@ public class SshKeyReader {
 			return new SshKey(keyFormat, null, publicKeyOnly ? new KeyPair(keyPair.getPublic(), null) : keyPair);
 		} else if (publicKeyOnly) {
 			return null;
-		} else if (password.getPasswordChars() == null) {
+		} else if (!password.hasPassword()) {
 			throw new WrongPasswordException("Key is encrypted, but no password was given");
 		} else {
 			// Putty uses "ISO-8859-1" for password encoding, even for those keys stored in OpenSSHv1 and OpenSSL format
@@ -469,7 +456,7 @@ public class SshKeyReader {
 	 * The JDK implementation of PBES2 only accepts ASCII passwords, so it is implemented here directly on the password bytes.
 	 */
 	private static KeyPair decryptPkcs8PrivateKey(final byte[] derData, final Password password) throws Exception {
-		if (password.getPasswordChars() == null) {
+		if (!password.hasPassword()) {
 			throw new WrongPasswordException("Key is encrypted, but no password was given");
 		}
 
@@ -787,7 +774,7 @@ public class SshKeyReader {
 	 * Reads the content of a PEM block up to the given end line.
 	 * Headers (RFC 1421, continuation lines start with whitespace) are only allowed before the base64 data.
 	 */
-	private static TextBlock readPemBlock(final BufferedReader dataReader, final String endLine) throws Exception {
+	private static TextBlock readPemBlock(final LimitedLineReader dataReader, final String endLine) throws Exception {
 		final TextBlock textBlock = new TextBlock();
 		final StringBuilder base64Data = new StringBuilder();
 		String lastHeaderName = null;
@@ -822,7 +809,7 @@ public class SshKeyReader {
 	 * Reads the content of a RFC 4716 block up to the given end line.
 	 * Header continuation lines end with a backslash, header values may be enclosed in double quotes.
 	 */
-	private static TextBlock readRfc4716Block(final BufferedReader dataReader, final String endLine) throws Exception {
+	private static TextBlock readRfc4716Block(final LimitedLineReader dataReader, final String endLine) throws Exception {
 		final TextBlock textBlock = new TextBlock();
 		final StringBuilder base64Data = new StringBuilder();
 		String nextLine;
@@ -843,7 +830,9 @@ public class SshKeyReader {
 					if (continuationLine == null) {
 						throw new Exception("Corrupt key data found: Missing header continuation line");
 					}
-					headerValue.append(continuationLine.trim());
+					final String continuationValue = continuationLine.trim();
+					checkHeaderValueLength(headerName, (long) headerValue.length() + continuationValue.length());
+					headerValue.append(continuationValue);
 				}
 				String value = headerValue.toString();
 				if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
@@ -862,20 +851,32 @@ public class SshKeyReader {
 		throw new Exception("Corrupt key data found: End line is missing: '" + endLine + "'");
 	}
 
+	/**
+	 * Header and data content of a PEM or RFC 4716 block.
+	 * The number of headers and the length of header values are limited (Denial of Service protection).
+	 */
 	private static class TextBlock {
-		private final Map<String, String> headers = new LinkedHashMap<>();
+		private final Map<String, StringBuilder> headers = new LinkedHashMap<>();
+		private int headerCount = 0;
 		private byte[] data;
 
-		private void setHeader(final String name, final String value) {
-			headers.put(name.toLowerCase(), value);
+		private void setHeader(final String name, final String value) throws Exception {
+			if (++headerCount > MAX_HEADER_COUNT) {
+				throw new Exception("Corrupt key data found: More than " + MAX_HEADER_COUNT + " headers");
+			}
+			checkHeaderValueLength(name, value.length());
+			headers.put(name.toLowerCase(), new StringBuilder(value));
 		}
 
-		private void appendToHeader(final String name, final String value) {
-			headers.put(name.toLowerCase(), headers.get(name.toLowerCase()) + value);
+		private void appendToHeader(final String name, final String value) throws Exception {
+			final StringBuilder headerValue = headers.get(name.toLowerCase());
+			checkHeaderValueLength(name, (long) headerValue.length() + value.length());
+			headerValue.append(value);
 		}
 
 		private String getHeader(final String name) {
-			return headers.get(name.toLowerCase());
+			final StringBuilder headerValue = headers.get(name.toLowerCase());
+			return headerValue == null ? null : headerValue.toString();
 		}
 
 		private byte[] getData() {
@@ -884,6 +885,12 @@ public class SshKeyReader {
 
 		private void setData(final byte[] data) {
 			this.data = data;
+		}
+	}
+
+	private static void checkHeaderValueLength(final String headerName, final long length) throws Exception {
+		if (length > MAX_HEADER_VALUE_LENGTH) {
+			throw new Exception("Corrupt key data found: Value of header '" + headerName + "' exceeds maximum allowed length of " + MAX_HEADER_VALUE_LENGTH + " characters");
 		}
 	}
 
@@ -937,7 +944,7 @@ public class SshKeyReader {
 				throw new Exception("Key derivation function info 'kdfRounds = " + kdfRounds + "' exceeds maximum allowed value of " + MAX_BCRYPT_KDF_ROUNDS + " for key derivation function '" + kdfName + "'. Maybe the key data is corrupted or malicious");
 			} else if (privateKeyDataBytes.length < 8 || privateKeyDataBytes.length % openSshCipher.blockSize != 0) {
 				throw new Exception("Invalid encrypted private key data length " + privateKeyDataBytes.length);
-			} else if (password.getPasswordChars() == null) {
+			} else if (!password.hasPassword()) {
 				throw new WrongPasswordException("Key is encrypted, but no password was given");
 			}
 
@@ -1199,12 +1206,16 @@ public class SshKeyReader {
 	// PuTTY
 	// ---------------------------------------------------------------------------------------------
 
-	private static Map<String, String> readPuttyKeyProperties(final BufferedReader dataReader) throws Exception {
+	private static Map<String, String> readPuttyKeyProperties(final LimitedLineReader dataReader) throws Exception {
 		final Map<String, String> keyProperties = new LinkedHashMap<>();
+		int headerCount = 0;
 		String nextLine;
 		while ((nextLine = dataReader.readLine()) != null) {
 			final int indexOfHeaderSeparator = nextLine.indexOf(": ");
 			if (indexOfHeaderSeparator > 0) {
+				if (++headerCount > MAX_HEADER_COUNT) {
+					throw new Exception("Corrupt key data found: More than " + MAX_HEADER_COUNT + " headers");
+				}
 				final String headerName = nextLine.substring(0, indexOfHeaderSeparator).trim();
 				if ("Public-Lines".equals(headerName) || "Private-Lines".equals(headerName)) {
 					final int numberOfLines;
@@ -1278,7 +1289,7 @@ public class SshKeyReader {
 			}
 			return new SshKey(keyFormat, comment, readPuttyPrivateKeyData(encryptedPrivateKeyData, publicKey, algorithm));
 		} else if ("aes256-cbc".equals(encryptionMethod)) {
-			if (password.getPasswordChars() == null || password.getPasswordChars().length == 0) {
+			if (!password.hasPassword()) {
 				throw new WrongPasswordException("Key is encrypted, but no password was given");
 			} else if (encryptedPrivateKeyData.length == 0 || encryptedPrivateKeyData.length % 16 != 0) {
 				throw new Exception("Invalid PuTTY key data: Invalid encrypted data length");

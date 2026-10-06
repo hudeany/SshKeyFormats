@@ -125,7 +125,7 @@ public class SshKeyWriter {
 
 		// Private key
 		try (final Password password = new Password(copyPasswordForEncryption(passwordChars))) {
-			if (password.getPasswordChars() != null) {
+			if (password.hasPassword()) {
 				// Encrypt private key data by bcrypt pbkdf
 				// Putty uses "ISO-8859-1" for password encoding, even for those keys stored in OpenSSHv1 and OpenSSL format
 				// "ssh-keygen" on Linx uses UTF-8 for password encoding

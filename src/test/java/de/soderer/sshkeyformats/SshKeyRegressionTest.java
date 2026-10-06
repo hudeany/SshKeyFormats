@@ -7,8 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.lang.reflect.Method;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -24,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import de.soderer.sshkeyformats.SshKey.SshKeyFormat;
 import de.soderer.sshkeyformats.data.Asn1Codec;
 import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
+import de.soderer.sshkeyformats.data.AuthorizedKeyException;
 import de.soderer.sshkeyformats.data.CryptographicUtilities;
 import de.soderer.sshkeyformats.data.KeyPairUtilities;
 import de.soderer.sshkeyformats.data.OID;
@@ -83,11 +82,60 @@ public class SshKeyRegressionTest {
 	}
 
 	@Test
-	public void testAuthorizedKeyDetectionDoesNotUseSubstringMatch() throws Exception {
-		final Method method = SshKeyReader.class.getDeclaredMethod("isAuthorizedKeyLine", String.class);
-		method.setAccessible(true);
-		assertFalse((Boolean) method.invoke(null, "prefix ssh-rsa not-a-key"));
-		assertTrue((Boolean) method.invoke(null, "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ== comment"));
+	public void testAuthorizedKeyLineErrorsAreReportedByParser() {
+		final String validKey = "AAAAC3NzaC1lZDI1NTE5AAAAIBYfzoo5dutqetlb/jD+wwKCfLFk6trcSjnbjB/HBgLX";
+		// Key type somewhere in the line is not enough
+		assertThrows(AuthorizedKeyException.class, () -> SshKeyReader.readKey(new ByteArrayInputStream("prefix ssh-rsa not-a-key".getBytes(StandardCharsets.UTF_8)), null));
+		// Syntax errors keep the detailed message of the parser
+		final AuthorizedKeyException exception = assertThrows(AuthorizedKeyException.class, () -> SshKeyReader.readKey(new ByteArrayInputStream(("no-such-option ssh-ed25519 " + validKey).getBytes(StandardCharsets.UTF_8)), null));
+		assertTrue(exception.getMessage().contains("Unknown authorized_keys option"), exception.getMessage());
+	}
+
+	@Test
+	public void testLineLengthLimit() {
+		final Exception exception = assertThrows(Exception.class, () -> SshKeyReader.readAllPublicKeys(endlessStream("", "A")));
+		assertTrue(exception.getMessage().contains("maximum allowed length"), exception.getMessage());
+	}
+
+	@Test
+	public void testHeaderLimits() {
+		final String[][] maliciousInputs = new String[][] {
+			// Endless RFC 4716 header continuation lines
+			{ "---- BEGIN SSH2 PUBLIC KEY ----\nComment: x\\\n", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\\n" },
+			// Endless RFC 4716 headers
+			{ "---- BEGIN SSH2 PUBLIC KEY ----\n", "X-Header-#: value\n" },
+			// Endless PEM headers
+			{ "-----BEGIN RSA PRIVATE KEY-----\n", "X-Header-#: value\n" },
+			// Endless PEM header continuation lines (formerly quadratic runtime)
+			{ "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n", " xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n" },
+			// Endless PuTTY headers
+			{ "PuTTY-User-Key-File-2: ssh-ed25519\n", "X-Header-#: value\n" } };
+		for (final String[] maliciousInput : maliciousInputs) {
+			final long start = System.currentTimeMillis();
+			final Exception exception = assertThrows(Exception.class, () -> SshKeyReader.readAllPublicKeys(endlessStream(maliciousInput[0], maliciousInput[1])));
+			assertTrue(exception.getMessage().contains("header"), exception.getMessage());
+			assertTrue(System.currentTimeMillis() - start < 5000, "Header limit check took too long");
+		}
+	}
+
+	/**
+	 * Creates an endless input stream: the header once, then the pattern forever. A "#" in the pattern is replaced by a counter.
+	 */
+	private static InputStream endlessStream(final String header, final String pattern) {
+		return new InputStream() {
+			private byte[] current = header.getBytes(StandardCharsets.ISO_8859_1);
+			private int index = 0;
+			private long counter = 0;
+
+			@Override
+			public int read() {
+				while (index >= current.length) {
+					current = pattern.replace("#", Long.toString(counter++)).getBytes(StandardCharsets.ISO_8859_1);
+					index = 0;
+				}
+				return current[index++] & 0xFF;
+			}
+		};
 	}
 
 	@Test

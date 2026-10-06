@@ -32,10 +32,23 @@ public class Password implements Closeable {
 		this.passwordChars = passwordChars;
 	}
 
-/**
- * getPasswordChars operation.
- * @return the resulting value.
- */
+	/**
+	 * Checks for an available, non-empty password without creating a copy of the password data.
+	 *
+	 * @return true if a non-empty password is set
+	 */
+	public boolean hasPassword() {
+		return passwordChars != null && passwordChars.length > 0;
+	}
+
+	/**
+	 * Returns a copy of the password characters.
+	 * <p>
+	 * <b>Watchout:</b> The caller is responsible to clear the returned copy (e.g. by {@code Arrays.fill(chars, (char) 0)}).
+	 * Use {@link #hasPassword()} to only check for an available password.
+	 *
+	 * @return a copy of the password characters, or {@code null} if no password is set
+	 */
 	public char[] getPasswordChars() {
 		return passwordChars == null ? null : passwordChars.clone();
 	}
