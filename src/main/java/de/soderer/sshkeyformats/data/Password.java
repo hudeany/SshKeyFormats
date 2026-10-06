@@ -79,9 +79,9 @@ public class Password implements Closeable {
 			Arrays.fill(passwordChars, (char) 0);
 			passwordChars = null;
 		}
-		if (passwordBytesIsoEncoded != null) {
-			Arrays.fill(passwordBytesIsoEncoded, (byte) 0);
-			passwordBytesIsoEncoded = null;
+		if (passwordBytesUtfEncoded != null) {
+			Arrays.fill(passwordBytesUtfEncoded, (byte) 0);
+			passwordBytesUtfEncoded = null;
 		}
 		if (passwordBytesIsoEncoded != null) {
 			Arrays.fill(passwordBytesIsoEncoded, (byte) 0);
@@ -92,6 +92,7 @@ public class Password implements Closeable {
 				Arrays.fill(sensitiveData, (byte) 0);
 			}
 		}
+		sensitiveDataToCleanup.clear();
 	}
 
 	private static byte[] encodeCharArrayToByteArray(final char[] chars, final Charset encoding) {

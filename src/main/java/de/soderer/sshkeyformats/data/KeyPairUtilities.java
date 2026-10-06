@@ -19,7 +19,7 @@ import java.security.interfaces.ECPrivateKey;
 import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.EdECPrivateKey;
 import java.security.interfaces.EdECPublicKey;
-import java.security.interfaces.RSAPrivateCrtKey;
+import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.ECParameterSpec;
@@ -173,32 +173,38 @@ public class KeyPairUtilities {
 	public static Algorithm getAlgorithm(final PublicKey publicKey) throws Exception {
 		if (publicKey == null){
 			throw new Exception("Invalid empty publicKey parameter");
-		} else if ("RSA".equals(publicKey.getAlgorithm())) {
+		} else if (publicKey instanceof RSAPublicKey) {
 			return Algorithm.RSA;
-		} else if ("DSA".equals(publicKey.getAlgorithm())) {
+		} else if (publicKey instanceof DSAPublicKey) {
 			return Algorithm.DSA;
-		} else if ("EC".equals(publicKey.getAlgorithm()) || "ECDSA".equals(publicKey.getAlgorithm())) {
-			final String nistCipher = CryptographicUtilities.getEcDsaEllipticCurveName((ECPublicKey) publicKey);
-			if ("nistp256".equalsIgnoreCase(nistCipher)) {
-				return Algorithm.NISTP256;
-			} else if ("nistp384".equalsIgnoreCase(nistCipher)) {
-				return Algorithm.NISTP384;
-			} else if ("nistp521".equalsIgnoreCase(nistCipher)) {
-				return Algorithm.NISTP521;
-			} else {
-				throw new IllegalArgumentException("Unknown NIST public key cipher: " + nistCipher);
-			}
-		} else if ("EdDSA".equals(publicKey.getAlgorithm())) {
-			final String ecCipher = ((EdECPublicKey) publicKey).getParams().getName();
-			if ("Ed25519".equals(ecCipher)) {
-				return Algorithm.ED25519;
-			} else if ("Ed448".equals(ecCipher)) {
-				return Algorithm.ED448;
-			} else {
-				throw new Exception("Unsupported EdDSA algorithm name: " + ecCipher);
-			}
+		} else if (publicKey instanceof ECPublicKey) {
+			return getEcAlgorithm(CryptographicUtilities.getEcDsaEllipticCurveName((ECPublicKey) publicKey));
+		} else if (publicKey instanceof EdECPublicKey) {
+			return getEdDsaAlgorithm(((EdECPublicKey) publicKey).getParams().getName());
 		} else {
 			throw new Exception("Unsupported ssh algorithm name: " + publicKey.getAlgorithm());
+		}
+	}
+
+	private static Algorithm getEcAlgorithm(final String nistCurveName) {
+		if ("nistp256".equalsIgnoreCase(nistCurveName)) {
+			return Algorithm.NISTP256;
+		} else if ("nistp384".equalsIgnoreCase(nistCurveName)) {
+			return Algorithm.NISTP384;
+		} else if ("nistp521".equalsIgnoreCase(nistCurveName)) {
+			return Algorithm.NISTP521;
+		} else {
+			throw new IllegalArgumentException("Unknown NIST key cipher: " + nistCurveName);
+		}
+	}
+
+	private static Algorithm getEdDsaAlgorithm(final String edDsaCurveName) throws Exception {
+		if ("Ed25519".equalsIgnoreCase(edDsaCurveName)) {
+			return Algorithm.ED25519;
+		} else if ("Ed448".equalsIgnoreCase(edDsaCurveName)) {
+			return Algorithm.ED448;
+		} else {
+			throw new Exception("Unsupported EdDSA algorithm name: " + edDsaCurveName);
 		}
 	}
 
@@ -215,32 +221,16 @@ public class KeyPairUtilities {
 	public static Algorithm getAlgorithm(final PrivateKey privateKey) throws Exception {
 		if (privateKey == null){
 			throw new Exception("Invalid empty privateKey parameter");
-		} else if (privateKey instanceof RSAPrivateCrtKey) {
+		} else if (privateKey instanceof RSAPrivateKey) {
 			return Algorithm.RSA;
 		} else if (privateKey instanceof DSAPrivateKey) {
 			return Algorithm.DSA;
 		} else if (privateKey instanceof ECPrivateKey) {
-			final String nistCipher = CryptographicUtilities.getEcDsaEllipticCurveName((ECPrivateKey) privateKey);
-			if ("nistp256".equalsIgnoreCase(nistCipher)) {
-				return Algorithm.NISTP256;
-			} else if ("nistp384".equalsIgnoreCase(nistCipher)) {
-				return Algorithm.NISTP384;
-			} else if ("nistp521".equalsIgnoreCase(nistCipher)) {
-				return Algorithm.NISTP521;
-			} else {
-				throw new IllegalArgumentException("Unknown NIST private key cipher: " + nistCipher);
-			}
+			return getEcAlgorithm(CryptographicUtilities.getEcDsaEllipticCurveName((ECPrivateKey) privateKey));
 		} else if (privateKey instanceof EdECPrivateKey) {
-			final String ecCipher = ((EdECPrivateKey) privateKey).getParams().getName();
-			if ("Ed25519".equalsIgnoreCase(ecCipher)) {
-				return Algorithm.ED25519;
-			} else if ("Ed448".equalsIgnoreCase(ecCipher)) {
-				return Algorithm.ED448;
-			} else {
-				throw new Exception("Unknown EdDSA type: " + ecCipher);
-			}
+			return getEdDsaAlgorithm(((EdECPrivateKey) privateKey).getParams().getName());
 		} else {
-			throw new IllegalArgumentException("Unknown private key cipher");
+			throw new IllegalArgumentException("Unknown private key cipher: " + privateKey.getAlgorithm());
 		}
 	}
 
@@ -253,8 +243,20 @@ public class KeyPairUtilities {
 	public static int getKeyStrength(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
-		} else {
+		} else if (keyPair.getPublic() != null) {
 			return getKeyStrength(keyPair.getPublic());
+		} else if (keyPair.getPrivate() != null) {
+			final PrivateKey privateKey = keyPair.getPrivate();
+			final Algorithm algorithm = getAlgorithm(privateKey);
+			if (Algorithm.RSA == algorithm) {
+				return ((RSAPrivateKey) privateKey).getModulus().bitLength();
+			} else if (Algorithm.DSA == algorithm) {
+				return ((DSAPrivateKey) privateKey).getParams().getP().bitLength();
+			} else {
+				return getKeyStrength(algorithm);
+			}
+		} else {
+			throw new Exception("KeyPair data is empty");
 		}
 	}
 
@@ -272,16 +274,27 @@ public class KeyPairUtilities {
 			if (Algorithm.RSA == algorithm) {
 				return ((RSAPublicKey) publicKey).getModulus().bitLength();
 			} else if (Algorithm.DSA == algorithm) {
-				return ((DSAPublicKey) publicKey).getY().bitLength();
-			} else if (Algorithm.NISTP256 == algorithm) {
-				return 256;
-			} else if (Algorithm.NISTP384 == algorithm) {
-				return 384;
-			} else if (Algorithm.NISTP521 == algorithm) {
-				return 521;
+				// The strength of a DSA key is the size of the prime p, the public value y may be shorter
+				return ((DSAPublicKey) publicKey).getParams().getP().bitLength();
 			} else {
-				throw new Exception("Unsupported ssh algorithm name: " + algorithm.name());
+				return getKeyStrength(algorithm);
 			}
+		}
+	}
+
+	private static int getKeyStrength(final Algorithm algorithm) throws Exception {
+		if (Algorithm.NISTP256 == algorithm) {
+			return 256;
+		} else if (Algorithm.NISTP384 == algorithm) {
+			return 384;
+		} else if (Algorithm.NISTP521 == algorithm) {
+			return 521;
+		} else if (Algorithm.ED25519 == algorithm) {
+			return 256;
+		} else if (Algorithm.ED448 == algorithm) {
+			return 448;
+		} else {
+			throw new Exception("Unsupported ssh algorithm name: " + algorithm.name());
 		}
 	}
 
@@ -326,11 +339,11 @@ public class KeyPairUtilities {
 				}
 				final List<DerTag> sshAlgorithmDerTags = Asn1Codec.readDerTags(derDataTags.get(0).getData());
 				final OID ecDsaPublicKeyOid = new OID(sshAlgorithmDerTags.get(0).getData());
-				if (Arrays.equals(OID.ECDSA_PUBLICKEY_ARRAY, ecDsaPublicKeyOid.getByteArrayEncoding())) {
+				if (OID.ECDSA_PUBLICKEY.matches(ecDsaPublicKeyOid.getByteArrayEncoding())) {
 					final OID ecDsaCurveOid = new OID(sshAlgorithmDerTags.get(1).getData());
-					if (Arrays.equals(OID.ECDSA_CURVE_NISTP256_ARRAY, ecDsaCurveOid.getByteArrayEncoding())
-							|| Arrays.equals(OID.ECDSA_CURVE_NISTP384_ARRAY, ecDsaCurveOid.getByteArrayEncoding())
-							|| Arrays.equals(OID.ECDSA_CURVE_NISTP521_ARRAY, ecDsaCurveOid.getByteArrayEncoding())) {
+					if (OID.ECDSA_CURVE_NISTP256.matches(ecDsaCurveOid.getByteArrayEncoding())
+							|| OID.ECDSA_CURVE_NISTP384.matches(ecDsaCurveOid.getByteArrayEncoding())
+							|| OID.ECDSA_CURVE_NISTP521.matches(ecDsaCurveOid.getByteArrayEncoding())) {
 						if (Asn1Codec.DER_TAG_BIT_STRING != derDataTags.get(1).getTagId()) {
 							throw new Exception("Invalid key data found");
 						} else {

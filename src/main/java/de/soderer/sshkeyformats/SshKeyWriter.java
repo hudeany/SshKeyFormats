@@ -11,8 +11,6 @@ import java.math.BigInteger;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
@@ -32,13 +30,10 @@ import java.util.Map;
 import java.util.Map.Entry;
 
 import javax.crypto.Cipher;
-import javax.crypto.Mac;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
-import org.bouncycastle.crypto.generators.Argon2BytesGenerator;
-import org.bouncycastle.crypto.params.Argon2Parameters;
 import org.bouncycastle.jce.ECNamedCurveTable;
 
 import de.soderer.sshkeyformats.data.Algorithm;
@@ -78,7 +73,7 @@ public class SshKeyWriter {
 	 * <br />
 	 * Watchout for PuTTY's key import can only use special characters in passwords, if the ISO-8859-1 encoding is used for passwordAndCommentEncoding.<br />
 	 * But OpenSSH's default encoding is UTF-8<br />
-	 
+
 	 * @param outputStream the stream receiving the encoded key
 	 * @param sshKey the SSH key to write
 	 * @param passwordChars the optional password used to encrypt the private key
@@ -97,9 +92,10 @@ public class SshKeyWriter {
 		// Storage format name
 		keyDataBuffer.writeZeroLimitedData("openssh-key-v1".getBytes(StandardCharsets.UTF_8));
 
+		final boolean encrypt = passwordChars != null && passwordChars.length > 0;
 		byte[] kdfInitialVectorBytes = null;
 		int kdfRounds = 0;
-		if (passwordChars == null) {
+		if (!encrypt) {
 			// EncryptionCipherName
 			keyDataBuffer.writeData("none".getBytes(StandardCharsets.UTF_8));
 			// kdf: key derivation function
@@ -128,7 +124,7 @@ public class SshKeyWriter {
 		keyDataBuffer.writeData(publicKeyData);
 
 		// Private key
-		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
+		try (final Password password = new Password(copyPasswordForEncryption(passwordChars))) {
 			if (password.getPasswordChars() != null) {
 				// Encrypt private key data by bcrypt pbkdf
 				// Putty uses "ISO-8859-1" for password encoding, even for those keys stored in OpenSSHv1 and OpenSSL format
@@ -251,8 +247,8 @@ public class SshKeyWriter {
 		}
 		final List<DerTag> sshAlgorithmDerTags = Asn1Codec.readDerTags(derDataTags.get(1).getData());
 		final OID sshAlgorithmOid = new OID(sshAlgorithmDerTags.get(0).getData());
-		if (Arrays.equals(OID.EDDSA25519_ALGORITHM_ARRAY, sshAlgorithmOid.getByteArrayEncoding())
-				|| Arrays.equals(OID.EDDSA448_ALGORITHM_ARRAY, sshAlgorithmOid.getByteArrayEncoding())) {
+		if (OID.EDDSA25519_ALGORITHM.matches(sshAlgorithmOid.getByteArrayEncoding())
+				|| OID.EDDSA448_ALGORITHM.matches(sshAlgorithmOid.getByteArrayEncoding())) {
 			if (Asn1Codec.DER_TAG_OCTET_STRING != derDataTags.get(2).getTagId()) {
 				throw new Exception("Invalid key data found");
 			} else {
@@ -280,8 +276,8 @@ public class SshKeyWriter {
 		}
 		final List<DerTag> sshAlgorithmDerTags = Asn1Codec.readDerTags(derDataTags.get(0).getData());
 		final OID sshAlgorithmOid = new OID(sshAlgorithmDerTags.get(0).getData());
-		if (Arrays.equals(OID.EDDSA25519_ALGORITHM_ARRAY, sshAlgorithmOid.getByteArrayEncoding())
-				|| Arrays.equals(OID.EDDSA448_ALGORITHM_ARRAY, sshAlgorithmOid.getByteArrayEncoding())) {
+		if (OID.EDDSA25519_ALGORITHM.matches(sshAlgorithmOid.getByteArrayEncoding())
+				|| OID.EDDSA448_ALGORITHM.matches(sshAlgorithmOid.getByteArrayEncoding())) {
 			if (Asn1Codec.DER_TAG_BIT_STRING != derDataTags.get(1).getTagId()) {
 				throw new Exception("Invalid key data found");
 			} else {
@@ -335,7 +331,7 @@ public class SshKeyWriter {
 	/**
 	 * Converts this public key into unprotected PEM format (PKCS#1) for OpenSSH keys<br />
 	 * This format includes public key data only and is NOT accepted by PuTTY's key import<br />
-	 
+
 	 * @param outputStream the stream receiving the encoded key
 	 * @param publicKey the public key to write
 	 * @throws Exception if the key cannot be encoded or written
@@ -360,7 +356,7 @@ public class SshKeyWriter {
 	 * <br />
 	 * Watchout for PuTTY's key import can only use special characters in passwords, if the ISO-8859-1 encoding is used for passwordEncoding.<br />
 	 * But OpenSSH's default encoding is UTF-8<br />
-	 
+
 	 * @param outputStream the stream receiving the encoded key
 	 * @param keyPair the key pair to write
 	 * @param passwordChars the optional password used to encrypt the private key
@@ -385,7 +381,7 @@ public class SshKeyWriter {
 	 * <br />
 	 * Watchout for PuTTY's key import can only use special characters in passwords, if the ISO-8859-1 encoding is used for passwordEncoding.<br />
 	 * But OpenSSH's default encoding is UTF-8<br />
-	 
+
 	 * @param outputStream the stream receiving the encoded key
 	 * @param keyPair the key pair to write
 	 * @param keyEncryptionCipherName the encryption cipher name, or {@code null} for the default
@@ -405,13 +401,13 @@ public class SshKeyWriter {
 			keyData = createDsaBinaryKey(keyPair);
 		} else if (Algorithm.NISTP256 == algorithm) {
 			keyTypeName = "EC PRIVATE KEY";
-			keyData = createEcdsaBinaryKey(keyPair, OID.ECDSA_CURVE_NISTP256_ARRAY);
+			keyData = createEcdsaBinaryKey(keyPair, OID.ECDSA_CURVE_NISTP256);
 		} else if (Algorithm.NISTP384 == algorithm) {
 			keyTypeName = "EC PRIVATE KEY";
-			keyData = createEcdsaBinaryKey(keyPair, OID.ECDSA_CURVE_NISTP384_ARRAY);
+			keyData = createEcdsaBinaryKey(keyPair, OID.ECDSA_CURVE_NISTP384);
 		} else if (Algorithm.NISTP521 == algorithm) {
 			keyTypeName = "EC PRIVATE KEY";
-			keyData = createEcdsaBinaryKey(keyPair, OID.ECDSA_CURVE_NISTP521_ARRAY);
+			keyData = createEcdsaBinaryKey(keyPair, OID.ECDSA_CURVE_NISTP521);
 		} else if (Algorithm.ED25519 == algorithm) {
 			keyTypeName = "PRIVATE KEY";
 			keyData = keyPair.getPrivate().getEncoded();
@@ -429,9 +425,9 @@ public class SshKeyWriter {
 				final byte[] passwordBytes;
 				if (passwordEncoding == null) {
 					passwordBytes = password.getPasswordBytesUtfEncoded();
-				} else if (passwordEncoding == StandardCharsets.UTF_8) {
+				} else if (StandardCharsets.UTF_8.equals(passwordEncoding)) {
 					passwordBytes = password.getPasswordBytesUtfEncoded();
-				} else if (passwordEncoding == StandardCharsets.ISO_8859_1) {
+				} else if (StandardCharsets.ISO_8859_1.equals(passwordEncoding)) {
 					passwordBytes = password.getPasswordBytesIsoEncoded();
 				} else {
 					throw new Exception("Unsupported passwordEncoding: " + passwordEncoding.name());
@@ -442,34 +438,58 @@ public class SshKeyWriter {
 				}
 
 				final SecureRandom rnd = new SecureRandom();
-				final Cipher cipher;
-				final String ivString;
-				if ("DES-EDE3-CBC".equalsIgnoreCase(keyEncryptionCipherName)) {
-					final byte[] iv = new byte[8];
-					rnd.nextBytes(iv);
-					ivString = toHexString(iv);
-					cipher = Cipher.getInstance("DESede/CBC/NoPadding");
-					cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(stretchPasswordForOpenSsl(passwordBytes, iv, 8, 24), "DESede"), new IvParameterSpec(iv));
-					keyData = addLengthCodedPadding(keyData, 8);
-				} else if ("AES-128-CBC".equalsIgnoreCase(keyEncryptionCipherName)) {
-					final byte[] iv = new byte[16];
-					rnd.nextBytes(iv);
-					ivString = toHexString(iv);
-					cipher = Cipher.getInstance("AES/CBC/NoPadding");
-					cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(stretchPasswordForOpenSsl(passwordBytes, iv, 8, 16), "AES"), new IvParameterSpec(iv));
-					keyData = addLengthCodedPadding(keyData, 16);
-				} else {
-					throw new Exception("Unknown key encryption cipher: " + keyEncryptionCipherName);
+				final String cipherName;
+				final String keyAlgorithm;
+				final int keySize;
+				final int blockSize;
+				switch (keyEncryptionCipherName.trim().toUpperCase()) {
+					case "DES-EDE3-CBC":
+						cipherName = "DESede/CBC/NoPadding";
+						keyAlgorithm = "DESede";
+						keySize = 24;
+						blockSize = 8;
+						break;
+					case "AES-128-CBC":
+						cipherName = "AES/CBC/NoPadding";
+						keyAlgorithm = "AES";
+						keySize = 16;
+						blockSize = 16;
+						break;
+					case "AES-192-CBC":
+						cipherName = "AES/CBC/NoPadding";
+						keyAlgorithm = "AES";
+						keySize = 24;
+						blockSize = 16;
+						break;
+					case "AES-256-CBC":
+						cipherName = "AES/CBC/NoPadding";
+						keyAlgorithm = "AES";
+						keySize = 32;
+						blockSize = 16;
+						break;
+					default:
+						throw new Exception("Unknown key encryption cipher: " + keyEncryptionCipherName);
 				}
+				final byte[] iv = new byte[blockSize];
+				rnd.nextBytes(iv);
+				final String ivString = toHexString(iv);
+				final Cipher cipher = Cipher.getInstance(cipherName);
+				final byte[] key = SshKeyReader.stretchPasswordForOpenSsl(passwordBytes, iv, 8, keySize);
+				try {
+					cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, keyAlgorithm), new IvParameterSpec(iv));
+				} finally {
+					clear(key);
+				}
+				keyData = addLengthCodedPadding(keyData, blockSize);
 				headers.put("Proc-Type", "4,ENCRYPTED");
-				headers.put("DEK-Info", keyEncryptionCipherName.toUpperCase() + "," + ivString);
+				headers.put("DEK-Info", keyEncryptionCipherName.trim().toUpperCase() + "," + ivString);
 
 				keyData = cipher.doFinal(keyData);
 			}
 		}
 
 		outputStream.write(("-----BEGIN " + keyTypeName + "-----\n").getBytes(StandardCharsets.UTF_8));
-		outputStream.write(getPemHeaderLines(headers, 64).getBytes(StandardCharsets.UTF_8));
+		outputStream.write(getPemHeaderLines(headers).getBytes(StandardCharsets.UTF_8));
 		outputStream.write(toWrappedBase64(keyData, 64, "\n").getBytes(StandardCharsets.UTF_8));
 		outputStream.write(("\n-----END " + keyTypeName + "-----\n").getBytes(StandardCharsets.UTF_8));
 	}
@@ -488,75 +508,28 @@ public class SshKeyWriter {
 		} else if (Algorithm.DSA == algorithm) {
 			outputStream.write(createDsaBinaryKey(keyPair));
 		} else if (Algorithm.NISTP256 == algorithm) {
-			outputStream.write(createEcdsaBinaryKey(keyPair, OID.ECDSA_CURVE_NISTP256_ARRAY));
+			outputStream.write(createEcdsaBinaryKey(keyPair, OID.ECDSA_CURVE_NISTP256));
 		} else if (Algorithm.NISTP384 == algorithm) {
-			outputStream.write(createEcdsaBinaryKey(keyPair, OID.ECDSA_CURVE_NISTP384_ARRAY));
+			outputStream.write(createEcdsaBinaryKey(keyPair, OID.ECDSA_CURVE_NISTP384));
 		} else if (Algorithm.NISTP521 == algorithm) {
-			outputStream.write(createEcdsaBinaryKey(keyPair, OID.ECDSA_CURVE_NISTP521_ARRAY));
+			outputStream.write(createEcdsaBinaryKey(keyPair, OID.ECDSA_CURVE_NISTP521));
+		} else if (Algorithm.ED25519 == algorithm || Algorithm.ED448 == algorithm) {
+			// EdDSA keys have no traditional format, so PKCS#8 is used
+			outputStream.write(keyPair.getPrivate().getEncoded());
 		} else {
 			throw new IllegalArgumentException("Unsupported cipher: " + algorithm.name());
 		}
 	}
 
-	private static String getPemHeaderLines(final Map<String, String> headers, final int maxLineLimit) {
+	private static String getPemHeaderLines(final Map<String, String> headers) {
 		final StringBuilder headerBuilder = new StringBuilder();
 		if (headers != null && !headers.isEmpty()) {
 			for (final Entry<String, String> entry : headers.entrySet()) {
-				headerBuilder.append(entry.getKey() + ": ");
-				if ((entry.getKey().length() + entry.getValue().length() + 2) > maxLineLimit) {
-					int offset = Math.max(maxLineLimit - entry.getKey().length() - 2, 0);
-					headerBuilder.append(entry.getValue().substring(0, offset) + "\\" + "\n");
-					for (; offset < entry.getValue().length(); offset += maxLineLimit) {
-						if ((offset + maxLineLimit) >= entry.getValue().length()) {
-							headerBuilder.append(entry.getValue().substring(offset) + "\n");
-						} else {
-							headerBuilder.append(entry.getValue().substring(offset, offset + maxLineLimit) + "\\" + "\n");
-						}
-					}
-				} else {
-					headerBuilder.append(entry.getValue() + "\n");
-				}
+				headerBuilder.append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
 			}
-
 			headerBuilder.append("\n");
 		}
 		return headerBuilder.toString();
-	}
-
-	/**
-	 * <b>Security note:</b> This implements the legacy OpenSSL "EVP_BytesToKey" key derivation
-	 * (single MD5 round, no configurable work factor), as mandated by the classic "Proc-Type:
-	 * 4,ENCRYPTED" PEM format for backward compatibility. This scheme is inherently weak against
-	 * brute-force attacks by modern standards and has been deprecated by OpenSSL itself in favor of
-	 * encrypted PKCS#8. It cannot be strengthened here without breaking compatibility with this
-	 * legacy format; prefer PKCS#8 or OpenSSH v1 encrypted key formats where possible.
-	 
-	 * @param outputStream the stream receiving the encoded key
-	 * @param sshKey the SSH key to write
-	 * @param passwordChars the optional password used to encrypt the private key
-	 * @throws Exception if the key cannot be encoded or written
-	 */
-	private static byte[] stretchPasswordForOpenSsl(final byte[] passwordBytes, final byte[] iv, final int usingIvSize, final int keySize) throws Exception {
-		final MessageDigest hash = MessageDigest.getInstance("MD5");
-		final byte[] key = new byte[keySize];
-		int hashesSize = keySize & 0XFFFFFFF0;
-
-		if ((keySize & 0XF) != 0) {
-			hashesSize += 0x10;
-		}
-
-		final byte[] hashes = new byte[hashesSize];
-		byte[] previous;
-		for (int index = 0; (index + 0x10) <= hashes.length; hash.update(previous, 0, previous.length)) {
-			hash.update(passwordBytes, 0, passwordBytes.length);
-			hash.update(iv, 0, usingIvSize);
-			previous = hash.digest();
-			System.arraycopy(previous, 0, hashes, index, previous.length);
-			index += previous.length;
-		}
-
-		System.arraycopy(hashes, 0, key, 0, key.length);
-		return key;
 	}
 
 	private static byte[] createRsaBinaryKey(final KeyPair keyPair) throws Exception {
@@ -589,7 +562,7 @@ public class SshKeyWriter {
 				);
 	}
 
-	private static byte[] createEcdsaBinaryKey(final KeyPair keyPair, final byte[] oidKey) throws Exception {
+	private static byte[] createEcdsaBinaryKey(final KeyPair keyPair, final OID curveOid) throws Exception {
 		final ECPrivateKey privateKey = ((ECPrivateKey) keyPair.getPrivate());
 		final ECPublicKey publicKey = ((ECPublicKey) keyPair.getPublic());
 
@@ -604,11 +577,11 @@ public class SshKeyWriter {
 		}
 		final List<DerTag> sshAlgorithmDerTags = Asn1Codec.readDerTags(derDataTags.get(0).getData());
 		final OID ecDsaPublicKeyOid = new OID(sshAlgorithmDerTags.get(0).getData());
-		if (Arrays.equals(OID.ECDSA_PUBLICKEY_ARRAY, ecDsaPublicKeyOid.getByteArrayEncoding())) {
+		if (OID.ECDSA_PUBLICKEY.matches(ecDsaPublicKeyOid.getByteArrayEncoding())) {
 			final OID ecDsaCurveOid = new OID(sshAlgorithmDerTags.get(1).getData());
-			if (Arrays.equals(OID.ECDSA_CURVE_NISTP256_ARRAY, ecDsaCurveOid.getByteArrayEncoding())
-					|| Arrays.equals(OID.ECDSA_CURVE_NISTP384_ARRAY, ecDsaCurveOid.getByteArrayEncoding())
-					|| Arrays.equals(OID.ECDSA_CURVE_NISTP521_ARRAY, ecDsaCurveOid.getByteArrayEncoding())) {
+			if (OID.ECDSA_CURVE_NISTP256.matches(ecDsaCurveOid.getByteArrayEncoding())
+					|| OID.ECDSA_CURVE_NISTP384.matches(ecDsaCurveOid.getByteArrayEncoding())
+					|| OID.ECDSA_CURVE_NISTP521.matches(ecDsaCurveOid.getByteArrayEncoding())) {
 				if (Asn1Codec.DER_TAG_BIT_STRING != derDataTags.get(1).getTagId()) {
 					throw new Exception("Invalid key data found");
 				} else {
@@ -623,10 +596,26 @@ public class SshKeyWriter {
 
 		return Asn1Codec.createDerTagData(Asn1Codec.DER_TAG_SEQUENCE,
 				Asn1Codec.createDerTagData(Asn1Codec.DER_TAG_INTEGER, BigInteger.ONE.toByteArray()),
-				Asn1Codec.createDerTagData(Asn1Codec.DER_TAG_OCTET_STRING, privateKey.getS().toByteArray()),
-				Asn1Codec.createDerTagData(Asn1Codec.DER_TAG_CONTEXT_SPECIFIC_0, Asn1Codec.createDerTagData(Asn1Codec.DER_TAG_OBJECT, oidKey)),
+				// RFC 5915: the private key is an unsigned octet string of the fixed length ceiling(log2(n) / 8)
+				Asn1Codec.createDerTagData(Asn1Codec.DER_TAG_OCTET_STRING, toFixedLengthUnsigned(privateKey.getS(), (privateKey.getParams().getOrder().bitLength() + 7) / 8)),
+				Asn1Codec.createDerTagData(Asn1Codec.DER_TAG_CONTEXT_SPECIFIC_0, Asn1Codec.createDerTagData(Asn1Codec.DER_TAG_OBJECT, curveOid.getByteArrayEncoding())),
 				Asn1Codec.createDerTagData(Asn1Codec.DER_TAG_CONTEXT_SPECIFIC_1, Asn1Codec.createDerTagData(Asn1Codec.DER_TAG_BIT_STRING, qBytes))
 				);
+	}
+
+	private static byte[] toFixedLengthUnsigned(final BigInteger value, final int length) throws Exception {
+		final byte[] signedBytes = value.toByteArray();
+		int start = 0;
+		while (start < signedBytes.length - 1 && signedBytes[start] == 0) {
+			start++;
+		}
+		final int significantLength = signedBytes.length - start;
+		if (significantLength > length) {
+			throw new Exception("Value is too large for fixed length " + length);
+		}
+		final byte[] result = new byte[length];
+		System.arraycopy(signedBytes, start, result, length - significantLength, significantLength);
+		return result;
 	}
 
 	private static byte[] addLengthCodedPadding(final byte[] data, final int paddingSize) {
@@ -654,8 +643,11 @@ public class SshKeyWriter {
  * @throws Exception if the operation cannot be completed.
  */
 	public static void writePuttyVersion2Key(final OutputStream outputStream, final SshKey sshKey, final char[] passwordChars) throws Exception {
-		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
+		final boolean encrypt = passwordChars != null && passwordChars.length > 0;
+		try (final Password password = new Password(copyPasswordForEncryption(passwordChars))) {
 			final Algorithm algorithm = sshKey.getAlgorithm();
+			final String comment = getPuttyComment(sshKey);
+			final String encryptionType = encrypt ? "aes256-cbc" : "none";
 
 			final byte[] publicKeyBytes = KeyPairUtilities.getPublicKeyBytes(sshKey.getKeyPair().getPublic());
 			byte[] privateKeyBytes = getPuttyVersion2PrivateKeyBytes(sshKey.getKeyPair().getPrivate());
@@ -663,15 +655,24 @@ public class SshKeyWriter {
 			// padding up to multiple of 16 bytes for AES/CBC/NoPadding encryption
 			privateKeyBytes = addRandomPadding(privateKeyBytes, 16);
 
-			final String macHash = calculatePuttyMacChecksumVersion2(password, algorithm, sshKey.getComment(), publicKeyBytes, privateKeyBytes);
+			final byte[] passwordBytes = encrypt ? password.getPasswordBytesIsoEncoded() : null;
+			final byte[] macKey = SshKeyReader.getPuttyMacKeyVersion2(passwordBytes);
+			final String macHash;
+			try {
+				macHash = SshKeyReader.calculatePuttyMac(2, macKey, algorithm, encryptionType, comment.getBytes(StandardCharsets.ISO_8859_1), publicKeyBytes, privateKeyBytes);
+			} finally {
+				clear(macKey);
+			}
 
-			if (password.getPasswordChars() != null) {
-				final byte[] puttyKeyEncryptionKey = getPuttyPrivateKeyEncryptionKeyVersion2(password.getPasswordBytesIsoEncoded());
-
-				final Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
-				cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(puttyKeyEncryptionKey, 0, 32, "AES"), new IvParameterSpec(new byte[16])); // initial vector=0
-
-				privateKeyBytes = cipher.doFinal(privateKeyBytes);
+			if (encrypt) {
+				final byte[] puttyKeyEncryptionKey = SshKeyReader.getPuttyPrivateKeyEncryptionKeyVersion2(passwordBytes);
+				try {
+					final Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
+					cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(puttyKeyEncryptionKey, 0, 32, "AES"), new IvParameterSpec(new byte[16])); // initial vector=0
+					privateKeyBytes = cipher.doFinal(privateKeyBytes);
+				} finally {
+					clear(puttyKeyEncryptionKey);
+				}
 			}
 
 			final String publicKeyBase64 = toWrappedBase64(publicKeyBytes, 64, "\r\n");
@@ -679,16 +680,27 @@ public class SshKeyWriter {
 
 			final StringBuilder content = new StringBuilder();
 			content.append("PuTTY-User-Key-File-2: ").append(algorithm.getSshAlgorithmId()).append("\r\n");
-			content.append("Encryption: ").append(password.getPasswordChars() == null ? "none" : "aes256-cbc").append("\r\n");
-			content.append("Comment: ").append(sshKey.getComment()).append("\r\n");
+			content.append("Encryption: ").append(encryptionType).append("\r\n");
+			content.append("Comment: ").append(comment).append("\r\n");
 			content.append("Public-Lines: ").append(getLineCount(publicKeyBase64)).append("\r\n");
 			content.append(publicKeyBase64).append("\r\n");
 			content.append("Private-Lines: ").append(getLineCount(privateKeyBase64)).append("\r\n");
 			content.append(privateKeyBase64).append("\r\n");
-			content.append("Private-MAC: ").append(macHash);
+			content.append("Private-MAC: ").append(macHash).append("\r\n");
 
 			outputStream.write(content.toString().getBytes(StandardCharsets.ISO_8859_1));
 		}
+	}
+
+	/**
+	 * PuTTY stores the comment as single header line, which is part of the MAC checksum.
+	 */
+	private static String getPuttyComment(final SshKey sshKey) {
+		final String comment = sshKey.getComment() == null ? "" : sshKey.getComment();
+		if (comment.indexOf('\r') >= 0 || comment.indexOf('\n') >= 0) {
+			throw new IllegalArgumentException("Linebreaks are not allowed in PuTTY key comments");
+		}
+		return comment;
 	}
 
 	private static byte[] getPuttyVersion2PrivateKeyBytes(final PrivateKey privateKey) throws Exception {
@@ -727,8 +739,11 @@ public class SshKeyWriter {
  * @throws Exception if the operation cannot be completed.
  */
 	public static void writePuttyVersion3Key(final OutputStream outputStream, final SshKey sshKey, final char[] passwordChars) throws Exception {
-		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
+		final boolean encrypt = passwordChars != null && passwordChars.length > 0;
+		try (final Password password = new Password(copyPasswordForEncryption(passwordChars))) {
 			final Algorithm algorithm = sshKey.getAlgorithm();
+			final String comment = getPuttyComment(sshKey);
+			final byte[] commentBytes = comment.getBytes(StandardCharsets.ISO_8859_1);
 
 			final byte[] publicKeyBytes = KeyPairUtilities.getPublicKeyBytes(sshKey.getKeyPair().getPublic());
 			byte[] privateKeyBytes = getPuttyVersion3PrivateKeyBytes(sshKey.getKeyPair().getPrivate());
@@ -740,14 +755,14 @@ public class SshKeyWriter {
 
 			final StringBuilder content = new StringBuilder();
 			content.append("PuTTY-User-Key-File-3: ").append(algorithm.getSshAlgorithmId()).append("\r\n");
-			content.append("Encryption: ").append(password.getPasswordChars() == null ? "none" : "aes256-cbc").append("\r\n");
-			content.append("Comment: ").append(sshKey.getComment()).append("\r\n");
+			content.append("Encryption: ").append(encrypt ? "aes256-cbc" : "none").append("\r\n");
+			content.append("Comment: ").append(comment).append("\r\n");
 			content.append("Public-Lines: ").append(getLineCount(publicKeyBase64)).append("\r\n");
 			content.append(publicKeyBase64).append("\r\n");
 
 			final String macHash;
 
-			if (password.getPasswordChars() != null) {
+			if (encrypt) {
 				final String keyDerivation = "Argon2id";
 				content.append("Key-Derivation: ").append(keyDerivation).append("\r\n");
 				final int argon2Memory = 8192;
@@ -762,8 +777,8 @@ public class SshKeyWriter {
 
 				byte[] puttyKeyEncryptionKey = null;
 				try {
-					puttyKeyEncryptionKey = getPuttyPrivateKeyEncryptionKeyVersion3Argon2(password.getPasswordBytesIsoEncoded(), keyDerivation, argon2Memory, argon2Passes, argon2Parallelism, argon2Salt);
-					macHash = calculatePuttyMacChecksumVersion3Argon2(algorithm, "aes256-cbc", sshKey.getComment(), publicKeyBytes, privateKeyBytes, puttyKeyEncryptionKey);
+					puttyKeyEncryptionKey = SshKeyReader.deriveArgon2Key(password.getPasswordBytesIsoEncoded(), keyDerivation, argon2Memory, argon2Passes, argon2Parallelism, argon2Salt);
+					macHash = SshKeyReader.calculatePuttyMac(3, Arrays.copyOfRange(puttyKeyEncryptionKey, 48, 80), algorithm, "aes256-cbc", commentBytes, publicKeyBytes, privateKeyBytes);
 
 					final Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
 					cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(puttyKeyEncryptionKey, 0, 32, "AES"), new IvParameterSpec(puttyKeyEncryptionKey, 32, 16));
@@ -773,14 +788,14 @@ public class SshKeyWriter {
 					clear(puttyKeyEncryptionKey);
 				}
 			} else {
-				macHash = calculatePuttyMacChecksumVersion3Argon2(algorithm, "none", sshKey.getComment(), publicKeyBytes, privateKeyBytes, null);
+				macHash = SshKeyReader.calculatePuttyMac(3, new byte[0], algorithm, "none", commentBytes, publicKeyBytes, privateKeyBytes);
 			}
 
 			final String privateKeyBase64 = toWrappedBase64(privateKeyBytes, 64, "\r\n");
 
 			content.append("Private-Lines: ").append(getLineCount(privateKeyBase64)).append("\r\n");
 			content.append(privateKeyBase64).append("\r\n");
-			content.append("Private-MAC: ").append(macHash);
+			content.append("Private-MAC: ").append(macHash).append("\r\n");
 
 			outputStream.write(content.toString().getBytes(StandardCharsets.ISO_8859_1));
 		}
@@ -832,115 +847,6 @@ public class SshKeyWriter {
 		}
 	}
 
-	private static byte[] getPuttyPrivateKeyEncryptionKeyVersion2(final byte[] passwordByteArray) throws NoSuchAlgorithmException {
-		final byte[] puttyKeyEncryptionKey = new byte[32];
-		final MessageDigest digest = MessageDigest.getInstance("SHA-1");
-
-		digest.update(new byte[] { 0, 0, 0, 0 });
-		digest.update(passwordByteArray);
-		final byte[] key1 = digest.digest();
-
-		digest.update(new byte[] { 0, 0, 0, 1 });
-		digest.update(passwordByteArray);
-		final byte[] key2 = digest.digest();
-
-		System.arraycopy(key1, 0, puttyKeyEncryptionKey, 0, 20);
-		System.arraycopy(key2, 0, puttyKeyEncryptionKey, 20, 12);
-		return puttyKeyEncryptionKey;
-	}
-
-	private static String calculatePuttyMacChecksumVersion2(final Password password, final Algorithm algorithm, final String comment, final byte[] publicKey, final byte[] privateKey) throws Exception {
-		final String encryptionType = password.getPasswordChars() == null ? "none" : "aes256-cbc";
-		final MessageDigest digest = MessageDigest.getInstance("SHA-1");
-		digest.update("putty-private-key-file-mac-key".getBytes(StandardCharsets.UTF_8));
-		if (password.getPasswordChars() != null) {
-			digest.update(password.getPasswordBytesIsoEncoded());
-		}
-		final byte[] key = digest.digest();
-
-		final Mac mac = Mac.getInstance("HmacSHA1");
-		mac.init(new SecretKeySpec(key, 0, 20, mac.getAlgorithm()));
-
-		final ByteArrayOutputStream out = new ByteArrayOutputStream();
-		final DataOutputStream data = new DataOutputStream(out);
-
-		final byte[] keyTypeBytes = algorithm.getSshAlgorithmId().getBytes(StandardCharsets.ISO_8859_1);
-		data.writeInt(keyTypeBytes.length);
-		data.write(keyTypeBytes);
-
-		final byte[] encryptionTypeBytes = encryptionType.getBytes(StandardCharsets.ISO_8859_1);
-		data.writeInt(encryptionTypeBytes.length);
-		data.write(encryptionTypeBytes);
-
-		final byte[] commentBytes = (comment == null ? "" : comment).getBytes(StandardCharsets.ISO_8859_1);
-		data.writeInt(commentBytes.length);
-		data.write(commentBytes);
-
-		data.writeInt(publicKey.length);
-		data.write(publicKey);
-
-		data.writeInt(privateKey.length);
-		data.write(privateKey);
-
-		return toHexString(mac.doFinal(out.toByteArray())).toLowerCase();
-	}
-
-	private static byte[] getPuttyPrivateKeyEncryptionKeyVersion3Argon2(final byte[] passwordByteArray, final String argon2Type, final int argon2Memory, final int argon2Passes, final int argon2Parallelism, final byte[] argon2Salt) throws Exception {
-		int argon2TypeInt;
-		if ("Argon2i".equalsIgnoreCase(argon2Type)) {
-			argon2TypeInt = Argon2Parameters.ARGON2_i;
-		} else if ("Argon2d".equalsIgnoreCase(argon2Type)) {
-			argon2TypeInt = Argon2Parameters.ARGON2_d;
-		} else if ("Argon2id".equalsIgnoreCase(argon2Type)) {
-			argon2TypeInt = Argon2Parameters.ARGON2_id;
-		} else {
-			throw new Exception("Unsupported Key-Derivation (Only \"Argon2i\", \"Argon2d\", \"Argon2id\" are supported): " + argon2Type);
-		}
-		final Argon2Parameters.Builder builder = new Argon2Parameters.Builder(argon2TypeInt)
-				.withVersion(Argon2Parameters.ARGON2_VERSION_13)
-				.withIterations(argon2Passes)
-				.withMemoryAsKB(argon2Memory)
-				.withParallelism(argon2Parallelism)
-				.withSalt(argon2Salt);
-		final Argon2BytesGenerator argon2BytesGenerator = new Argon2BytesGenerator();
-		argon2BytesGenerator.init(builder.build());
-		final byte[] puttyKeyEncryptionKey = new byte[80];
-		argon2BytesGenerator.generateBytes(passwordByteArray, puttyKeyEncryptionKey);
-		return puttyKeyEncryptionKey;
-	}
-
-	private static String calculatePuttyMacChecksumVersion3Argon2(final Algorithm algorithm, final String encryptionType, final String comment, final byte[] publicKey, final byte[] privateKey, final byte[] puttyKeyEncryptionKey) throws Exception {
-		final Mac mac = Mac.getInstance("HMACSHA256");
-		if (puttyKeyEncryptionKey != null) {
-			mac.init(new SecretKeySpec(puttyKeyEncryptionKey, 48, 32, mac.getAlgorithm()));
-		} else {
-			mac.init(new SecretKeySpec(new byte[32], 0, 32, mac.getAlgorithm()));
-		}
-
-		final ByteArrayOutputStream out = new ByteArrayOutputStream();
-		final DataOutputStream data = new DataOutputStream(out);
-
-		final byte[] keyTypeBytes = algorithm.getSshAlgorithmId().getBytes(StandardCharsets.ISO_8859_1);
-		data.writeInt(keyTypeBytes.length);
-		data.write(keyTypeBytes);
-
-		final byte[] encryptionTypeBytes = encryptionType.getBytes(StandardCharsets.ISO_8859_1);
-		data.writeInt(encryptionTypeBytes.length);
-		data.write(encryptionTypeBytes);
-
-		final byte[] commentBytes = comment.getBytes(StandardCharsets.ISO_8859_1);
-		data.writeInt(commentBytes.length);
-		data.write(commentBytes);
-
-		data.writeInt(publicKey.length);
-		data.write(publicKey);
-
-		data.writeInt(privateKey.length);
-		data.write(privateKey);
-
-		return toHexString(mac.doFinal(out.toByteArray())).toLowerCase();
-	}
-
 	/**
 	 * Converts byte array to base64 with linebreaks
 	 */
@@ -974,6 +880,17 @@ public class SshKeyWriter {
 	private static void clear(final byte[] array) {
 		if (array != null) {
 			Arrays.fill(array, (byte) 0);
+		}
+	}
+
+	/**
+	 * Returns a copy of the password, or null if no password (null or empty) is given, which means no encryption.
+	 */
+	private static char[] copyPasswordForEncryption(final char[] passwordChars) {
+		if (passwordChars == null || passwordChars.length == 0) {
+			return null;
+		} else {
+			return passwordChars.clone();
 		}
 	}
 }

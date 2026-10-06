@@ -3,53 +3,52 @@ package de.soderer.sshkeyformats;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.security.AlgorithmParameters;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
+import java.security.Provider;
 import java.security.PublicKey;
-import java.security.Security;
 import java.security.spec.AlgorithmParameterSpec;
 import java.security.spec.DSAPrivateKeySpec;
 import java.security.spec.DSAPublicKeySpec;
-import java.security.spec.ECGenParameterSpec;
-import java.security.spec.ECParameterSpec;
-import java.security.spec.ECPrivateKeySpec;
 import java.security.spec.EdECPoint;
 import java.security.spec.EdECPrivateKeySpec;
 import java.security.spec.EdECPublicKeySpec;
 import java.security.spec.NamedParameterSpec;
 import java.security.spec.RSAPrivateCrtKeySpec;
 import java.security.spec.RSAPublicKeySpec;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.Base64.Decoder;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import javax.crypto.Cipher;
 import javax.crypto.Mac;
-import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 import org.bouncycastle.crypto.generators.Argon2BytesGenerator;
 import org.bouncycastle.crypto.params.Argon2Parameters;
+import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters;
+import org.bouncycastle.crypto.params.Ed448PrivateKeyParameters;
 import org.bouncycastle.jce.ECNamedCurveTable;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.jce.spec.ECNamedCurveParameterSpec;
 
 import de.soderer.sshkeyformats.SshKey.SshKeyFormat;
 import de.soderer.sshkeyformats.data.Algorithm;
@@ -57,6 +56,7 @@ import de.soderer.sshkeyformats.data.Asn1Codec;
 import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
 import de.soderer.sshkeyformats.data.AuthorizedKeyLineParser;
 import de.soderer.sshkeyformats.data.BCryptPBKDF;
+import de.soderer.sshkeyformats.data.KeyPairUtilities;
 import de.soderer.sshkeyformats.data.OID;
 import de.soderer.sshkeyformats.data.Password;
 import de.soderer.sshkeyformats.data.WrongPasswordException;
@@ -66,10 +66,13 @@ import de.soderer.sshkeyformats.data.WrongPasswordException;
  * <br />
  * Supported key formats:<br />
  * - OpenSSHv1 (proprietary format of OpenSSH, "-----BEGIN OPENSSH PRIVATE KEY-----")<br />
- * - OpenSSL, PKCS#8 ("-----BEGIN RSA/DSA/EC PRIVATE KEY-----", doesn't support EdDSA)<br />
+ * - OpenSSL traditional ("-----BEGIN RSA/DSA/EC PRIVATE KEY-----", optionally encrypted by "Proc-Type: 4,ENCRYPTED")<br />
+ * - PKCS#8 ("-----BEGIN PRIVATE KEY-----" and "-----BEGIN ENCRYPTED PRIVATE KEY-----" with PBES2/PBKDF2)<br />
+ * - X.509 SubjectPublicKeyInfo ("-----BEGIN PUBLIC KEY-----") and PKCS#1 ("-----BEGIN RSA PUBLIC KEY-----")<br />
  * - PuTTY key version 2 ("PuTTY-User-Key-File-2: ...")<br />
  * - PuTTY key version 3 ("PuTTY-User-Key-File-3: ...")<br />
- * - PKCS#1 ("---- BEGIN SSH2 PRIVATE KEY ----", no password encryption)<br />
+ * - RFC 4716 ("---- BEGIN SSH2 PUBLIC KEY ----")<br />
+ * - OpenSSH public keys and authorized_keys lines<br />
  * <br />
  * Supported cipher algorithms:<br />
  * - RSA<br />
@@ -83,16 +86,61 @@ public class SshKeyReader {
 	 * Sanity upper bound for the bcrypt KDF round count of encrypted OpenSSH v1 private keys, to
 	 * protect against maliciously crafted or corrupted key files that could otherwise force a
 	 * practically unbounded CPU-bound loop during key derivation (Denial of Service protection),
-	 * which happens before the password can even be validated. This limit is generous compared to
-	 * any reasonable real-world OpenSSH configuration (ssh-keygen defaults to 16 rounds).
+	 * which happens before the password can even be validated. One round takes roughly 15 ms, so this
+	 * limit allows about 2.5 minutes per derivation, while ssh-keygen defaults to 16 rounds.
 	 */
-	private static final int MAX_BCRYPT_KDF_ROUNDS = 1_000_000;
+	static final int MAX_BCRYPT_KDF_ROUNDS = 10_000;
+
+	/** Sanity upper bound for PBKDF2 iterations of encrypted PKCS#8 keys (OpenSSL default is 2048). */
+	static final int MAX_PBKDF2_ITERATIONS = 10_000_000;
+
+	/** Sanity upper bound for the Argon2 memory of PuTTY v3 keys in KiB (PuTTY default is 8192 KiB). */
+	static final int MAX_ARGON2_MEMORY_KB = 1024 * 1024;
+
+	/** Sanity upper bound for the Argon2 passes of PuTTY v3 keys. */
+	static final int MAX_ARGON2_PASSES = 1000;
+
+	/** Sanity upper bound for the product of Argon2 memory and passes of PuTTY v3 keys (64 GiB processed in total). */
+	static final long MAX_ARGON2_MEMORY_TIMES_PASSES_KB = 64L * 1024 * 1024;
+
+	/** Sanity upper bound for the Argon2 parallelism of PuTTY v3 keys. */
+	static final int MAX_ARGON2_PARALLELISM = 64;
+
+	/** BouncyCastle provider instance, used directly without registering it globally in the JVM. */
+	static final Provider BC_PROVIDER = new BouncyCastleProvider();
+
+	private static final String PEM_BEGIN_PREFIX = "-----BEGIN ";
+	private static final String PEM_SUFFIX = "-----";
+	private static final String SSH2_BEGIN_PREFIX = "---- BEGIN SSH2 ";
+	private static final String SSH2_SUFFIX = " KEY ----";
+
+	private static final OID OID_PBES2 = oid("1.2.840.113549.1.5.13");
+	private static final OID OID_PBKDF2 = oid("1.2.840.113549.1.5.12");
+	private static final OID OID_SCRYPT = oid("1.3.6.1.4.1.11591.4.11");
+	private static final OID OID_HMAC_SHA1 = oid("1.2.840.113549.2.7");
+	private static final OID OID_HMAC_SHA224 = oid("1.2.840.113549.2.8");
+	private static final OID OID_HMAC_SHA256 = oid("1.2.840.113549.2.9");
+	private static final OID OID_HMAC_SHA384 = oid("1.2.840.113549.2.10");
+	private static final OID OID_HMAC_SHA512 = oid("1.2.840.113549.2.11");
+	private static final OID OID_AES128_CBC = oid("2.16.840.1.101.3.4.1.2");
+	private static final OID OID_AES192_CBC = oid("2.16.840.1.101.3.4.1.22");
+	private static final OID OID_AES256_CBC = oid("2.16.840.1.101.3.4.1.42");
+	private static final OID OID_DES_EDE3_CBC = oid("1.2.840.113549.3.7");
+
+	private static OID oid(final String oidString) {
+		try {
+			return new OID(oidString);
+		} catch (final Exception e) {
+			throw new IllegalStateException(e);
+		}
+	}
 
 	/**
 	 * Reads all public key data and ignores private key parts.
 	 * <p>
 	 * This is useful when only the public keys are needed and the password of an
-	 * encrypted private key is not available.
+	 * encrypted private key is not available. Unencrypted private keys contribute their public key.
+	 * Encrypted private keys, which do not contain unencrypted public key data, are skipped.
 	 *
 	 * @param inputStream the input stream containing one or more SSH public keys
 	 * @return the public keys found in the input stream
@@ -102,7 +150,7 @@ public class SshKeyReader {
 		try (final BufferedReader dataReader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.ISO_8859_1))) {
 			final List<SshKey> keyList = new ArrayList<>();
 			SshKey nextKey;
-			while ((nextKey = readKey(dataReader, null, true)) != null) {
+			while ((nextKey = readNextKey(dataReader, null, true)) != null) {
 				keyList.add(nextKey);
 			}
 			return keyList;
@@ -113,415 +161,1398 @@ public class SshKeyReader {
 	 * Reads public and private key data, as far as it is available.
 	 * <p>
 	 * A password is optional and should be {@code null} for unencrypted private keys.
-	 * When multiple public keys are stored in the input, only the first key is read.
+	 * When multiple keys are stored in the input, only the first key is read.
 	 *
 	 * @param inputStream the input stream containing the SSH key
 	 * @param passwordChars the password for an encrypted private key, or {@code null} for an unencrypted key
-	 * @return the first SSH key found in the input stream
+	 * @return the first SSH key found in the input stream, or {@code null} if the input contains no key
 	 * @throws Exception if the input cannot be parsed or the password is incorrect
 	 */
 	public static SshKey readKey(final InputStream inputStream, final char[] passwordChars) throws Exception {
 		try (final BufferedReader dataReader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.ISO_8859_1))) {
-			return readKey(dataReader, passwordChars, false);
+			return readNextKey(dataReader, passwordChars, false);
 		}
 	}
 
-	private static SshKey readKey(final BufferedReader dataReader, final char[] passwordChars, final boolean skipPrivateKey) throws Exception {
+	/**
+	 * Reads the next key of the input.
+	 * <p>
+	 * The stream is read internally with ISO-8859-1 charset, because PuTTY keys use it and their comments are part of the MAC checksum.
+	 *
+	 * @return the next key or {@code null} at the end of the input
+	 */
+	private static SshKey readNextKey(final BufferedReader dataReader, final char[] passwordChars, final boolean publicKeyOnly) throws Exception {
 		try (final Password password = new Password(passwordChars == null ? null : passwordChars.clone())) {
-			// Read the stream internally with ISO-8859-1 charset, because PuTTY keys use it and their comments are part of the MAC checksum, which would be wrong otherwise.
-			// OpenSSH keys and OpenSSL keys are more robust in that matters and their comments encoding will be fixed if needed
-			String nextLine;
-
-			// Skip empty lines and comment lines (#), especially for public key files
-			while ((nextLine = dataReader.readLine()) != null) {
-				if (isNotBlank(nextLine) && !nextLine.startsWith("#")) {
-					break;
+			while (true) {
+				final String nextLine = readNextContentLine(dataReader);
+				if (nextLine == null) {
+					return null;
 				}
-			}
 
-			if (nextLine == null) {
-				// This was the last key or there is none at all
-				return null;
-			} else if (nextLine.startsWith("-----BEGIN ") && nextLine.endsWith("-----")) {
-				final String currentKeyName = nextLine.substring(11, nextLine.length() - 5);
-				final Map<String, String> keyProperties = readUpToLine(dataReader, nextLine.replace("BEGIN ", "END "));
-				Charset passwordCharset = StandardCharsets.UTF_8;
-				while (true) {
-					try {
-						byte[] keyData = Base64.getDecoder().decode(keyProperties.get(null));
-						if (currentKeyName.toLowerCase().contains("private")) {
-							if (currentKeyName.startsWith("RSA")) {
-								if (skipPrivateKey) {
-									return null;
-								} else {
-									if ("4,ENCRYPTED".equals(keyProperties.get("Proc-Type")) && !skipPrivateKey) {
-										keyData = decryptOpenSslKeyData(keyData, keyProperties.get("DEK-Info"), password, passwordCharset);
-									}
-									return new SshKey(SshKeyFormat.OpenSSL, null, readPKCS8RsaPrivateKey(keyData));
-								}
-							} else if (currentKeyName.startsWith("DSA")) {
-								if (skipPrivateKey) {
-									return null;
-								} else {
-									if ("4,ENCRYPTED".equals(keyProperties.get("Proc-Type")) && !skipPrivateKey) {
-										keyData = decryptOpenSslKeyData(keyData, keyProperties.get("DEK-Info"), password, passwordCharset);
-									}
-									return new SshKey(SshKeyFormat.OpenSSL, null, readPKCS8DsaPrivateKey(keyData));
-								}
-							} else if (currentKeyName.startsWith("EC")) {
-								if (skipPrivateKey) {
-									return null;
-								} else {
-									if ("4,ENCRYPTED".equals(keyProperties.get("Proc-Type")) && !skipPrivateKey) {
-										keyData = decryptOpenSslKeyData(keyData, keyProperties.get("DEK-Info"), password, passwordCharset);
-									}
-									return new SshKey(SshKeyFormat.OpenSSL, null, readPKCS8EcdsaPrivateKey(keyData));
-								}
-							} else if (currentKeyName.startsWith("OPENSSH")) {
-								return readOpenSshv1Key(keyData, password, skipPrivateKey);
-							} else {
-								if (skipPrivateKey) {
-									return null;
-								} else {
-									SshKeyFormat keyFormat = SshKeyFormat.PKCS1;
-									if ("4,ENCRYPTED".equals(keyProperties.get("Proc-Type")) && !skipPrivateKey) {
-										keyData = decryptOpenSslKeyData(keyData, keyProperties.get("DEK-Info"), password, passwordCharset);
-										keyFormat = SshKeyFormat.OpenSSL;
-									}
-									final PrivateKey privateKey = parseDerEncodedPrivateKey(keyData);
-
-									// Skip empty lines and comment lines (#), especially for public key files
-									while ((nextLine = dataReader.readLine()) != null) {
-										if (isNotBlank(nextLine) && !nextLine.startsWith("#")) {
-											break;
-										}
-									}
-
-									PublicKey publicKey = null;
-									if (nextLine != null && "---- BEGIN SSH2 PUBLIC KEY ----".equals(nextLine)) {
-										// "---- BEGIN SSH2 PUBLIC KEY ----"
-										final Map<String, String> publicKeyProperties = readUpToLine(dataReader, nextLine.replace("BEGIN ", "END "));
-										final byte[] publicKeyData = Base64.getDecoder().decode(publicKeyProperties.get(null));
-										publicKey = parsePublicKeyBytes(publicKeyData);
-									}
-
-									return new SshKey(keyFormat, null, new KeyPair(publicKey, privateKey));
-								}
-							}
-						} else if (currentKeyName.toLowerCase().contains("public")) {
-							return new SshKey(SshKeyFormat.OpenSSL, null, new KeyPair(parsePublicKeyBytes(keyData), null));
-						} else {
-							throw new Exception("Unknown key identifier found: " + nextLine);
-						}
-					} catch (final Exception e) {
-						// Putty uses "ISO-8859-1" for password encoding, even for those keys stored in OpenSSHv1 and OpenSSL format
-						// "ssh-keygen" on Linux uses UTF-8 for password encoding
-						if (password.getPasswordChars() != null && StandardCharsets.UTF_8.equals(passwordCharset)) {
-							if (!Arrays.equals(password.getPasswordBytesIsoEncoded(), password.getPasswordBytesUtfEncoded())) {
-								passwordCharset = StandardCharsets.ISO_8859_1;
-							} else {
-								throw e;
-							}
-						} else {
-							throw e;
-						}
+				final SshKey sshKey;
+				if (nextLine.startsWith(PEM_BEGIN_PREFIX) && nextLine.endsWith(PEM_SUFFIX) && nextLine.length() > PEM_BEGIN_PREFIX.length() + PEM_SUFFIX.length()) {
+					final String pemTypeName = nextLine.substring(PEM_BEGIN_PREFIX.length(), nextLine.length() - PEM_SUFFIX.length()).trim();
+					final TextBlock pemBlock = readPemBlock(dataReader, "-----END " + pemTypeName + "-----");
+					sshKey = readPemKey(pemTypeName, pemBlock, password, publicKeyOnly);
+				} else if (nextLine.startsWith(SSH2_BEGIN_PREFIX) && nextLine.endsWith(SSH2_SUFFIX)) {
+					final TextBlock ssh2Block = readRfc4716Block(dataReader, nextLine.replace("BEGIN ", "END "));
+					if (nextLine.toLowerCase().contains("public")) {
+						sshKey = new SshKey(SshKeyFormat.OpenSSL, ssh2Block.getHeader("Comment"), new KeyPair(parsePublicKeyBytes(ssh2Block.getData()), null));
+					} else if (nextLine.toLowerCase().contains("private")) {
+						sshKey = readTraditionalPrivateKey("RSA", ssh2Block, password, publicKeyOnly, SshKeyFormat.OpenSSL);
+					} else {
+						throw new Exception("Unknown key identifier found: " + nextLine);
 					}
-				}
-			} else if (nextLine.startsWith("---- BEGIN SSH2 ") && nextLine.endsWith(" KEY ----")) {
-				if (nextLine.toLowerCase().contains("private")) {
-					// "---- BEGIN SSH2 PRIVATE KEY ----"
-					final Map<String, String> keyProperties = readUpToLine(dataReader, nextLine.replace("BEGIN ", "END "));
-					Charset passwordCharset = StandardCharsets.UTF_8;
-					while (true) {
-						try {
-							byte[] keyData = Base64.getDecoder().decode(keyProperties.get(null));
-							if ("4,ENCRYPTED".equals(keyProperties.get("Proc-Type"))) {
-								keyData = decryptOpenSslKeyData(keyData, keyProperties.get("DEK-Info"), password, passwordCharset);
-							}
-							return new SshKey(SshKeyFormat.OpenSSL, null, readPKCS8RsaPrivateKey(keyData));
-						} catch (final Exception e) {
-							// Putty uses "ISO-8859-1" for password encoding, even for those keys stored in OpenSSHv1 and OpenSSL format
-							// "ssh-keygen" on Linux uses UTF-8 for password encoding
-							if (password.getPasswordChars() != null && StandardCharsets.UTF_8.equals(passwordCharset)) {
-								if (!Arrays.equals(password.getPasswordBytesIsoEncoded(), password.getPasswordBytesUtfEncoded())) {
-									passwordCharset = StandardCharsets.ISO_8859_1;
-								} else {
-									throw e;
-								}
-							} else {
-								throw e;
-							}
-						}
+				} else if (nextLine.startsWith("PuTTY-User-Key-File-2:") || nextLine.startsWith("PuTTY-User-Key-File-3:")) {
+					final int puttyVersion = nextLine.startsWith("PuTTY-User-Key-File-2:") ? 2 : 3;
+					final Map<String, String> keyProperties = readPuttyKeyProperties(dataReader);
+					keyProperties.put("PuTTY-User-Key-File", nextLine.substring(nextLine.indexOf(':') + 1).trim());
+					sshKey = readPuttyKey(puttyVersion, keyProperties, password, publicKeyOnly);
+				} else if (isAuthorizedKeyLine(nextLine)) {
+					final AuthorizedKey authorizedKey = AuthorizedKeyLineParser.parseAuthorizedKeyLine(nextLine);
+					authorizedKey.setKeyPair(new KeyPair(parsePublicKeyBytes(Base64.getDecoder().decode(authorizedKey.getKeyString())), null));
+					if (authorizedKey.getKeyType() != authorizedKey.getAlgorithm()) {
+						throw new Exception("AuthorizedKey keytype mismatch for authorizedKey line \"" + nextLine + "\". Public keys keytype is " + authorizedKey.getAlgorithm());
 					}
-				} else if (nextLine.toLowerCase().contains("public")) {
-					// "---- BEGIN SSH2 PUBLIC KEY ----"
-					final Map<String, String> keyProperties = readUpToLine(dataReader, nextLine.replace("BEGIN ", "END "));
-					final byte[] keyData = Base64.getDecoder().decode(keyProperties.get(null));
-					return new SshKey(SshKeyFormat.OpenSSL, null, new KeyPair(parsePublicKeyBytes(keyData), null));
+					sshKey = authorizedKey;
+				} else if (isBase64(nextLine)) {
+					sshKey = new SshKey(SshKeyFormat.OpenSSL, null, new KeyPair(parsePublicKeyBytes(Base64.getDecoder().decode(nextLine)), null));
 				} else {
-					throw new Exception("Unknown key identifier found: " + nextLine);
+					throw new Exception("No keydata found");
 				}
-			} else if (nextLine.startsWith("PuTTY-User-Key-File-2")) {
-				final Map<String, String> keyProperties = readPuttyKeyProperties(dataReader);
-				keyProperties.put("PuTTY-User-Key-File-2", nextLine.split(" ", 2)[1]);
-				return readPuttyVersion2Key(keyProperties, password, skipPrivateKey);
-			} else if (nextLine.startsWith("PuTTY-User-Key-File-3")) {
-				final Map<String, String> keyProperties = readPuttyKeyProperties(dataReader);
-				keyProperties.put("PuTTY-User-Key-File-3", nextLine.split(" ", 2)[1]);
-				return readPuttyVersion3Key(keyProperties, password, skipPrivateKey);
-			} else if (nextLine.contains(Algorithm.RSA.getSshAlgorithmId() + " ")
-					|| nextLine.contains(Algorithm.DSA.getSshAlgorithmId() + " ")
-					|| nextLine.contains(Algorithm.NISTP256.getSshAlgorithmId() + " ")
-					|| nextLine.contains(Algorithm.NISTP384.getSshAlgorithmId() + " ")
-					|| nextLine.contains(Algorithm.NISTP521.getSshAlgorithmId() + " ")
-					|| nextLine.contains(Algorithm.ED25519.getSshAlgorithmId() + " ")
-					|| nextLine.contains(Algorithm.ED448.getSshAlgorithmId() + " ")) {
-				final AuthorizedKey authorizedKey = new AuthorizedKeyLineParser().parseAuthorizedKeyLine(nextLine);
-				byte[] keyData;
-				try {
-					keyData = Base64.getDecoder().decode(authorizedKey.getKeyString());
-				} catch (final Exception e) {
-					throw new Exception("AuthorizedKey key encoding is invalid for authorizedKey line \"" + nextLine + "\"", e);
+
+				if (sshKey != null) {
+					return sshKey;
 				}
-				authorizedKey.setKeyPair(new KeyPair(parsePublicKeyBytes(keyData), null));
-				if (authorizedKey.getKeyType() != authorizedKey.getAlgorithm()) {
-					throw new Exception("AuthorizedKey keytype mismatch for authorizedKey line \"" + nextLine + "\". Public keys keytype is " + authorizedKey.getAlgorithm());
-				}
-				return authorizedKey;
-			} else if (isBase64(nextLine.trim())) {
-				final byte[] keyData = Base64.getDecoder().decode(nextLine.trim());
-				return new SshKey(SshKeyFormat.OpenSSL, null, new KeyPair(parsePublicKeyBytes(keyData), null));
-			} else {
-				throw new Exception("No keydata found");
+				// Key was skipped (encrypted private key without public key data in public key only mode), continue with the next one
 			}
 		}
 	}
 
-	private static boolean isBase64(final String nextLine) {
+	private static String readNextContentLine(final BufferedReader dataReader) throws IOException {
+		String nextLine;
+		while ((nextLine = dataReader.readLine()) != null) {
+			nextLine = nextLine.trim();
+			// Skip empty lines and comment lines (#), especially for public key files
+			if (!nextLine.isEmpty() && !nextLine.startsWith("#")) {
+				return nextLine;
+			}
+		}
+		return null;
+	}
+
+	private static boolean isAuthorizedKeyLine(final String line) {
+		for (final Algorithm algorithm : Algorithm.values()) {
+			if (line.contains(algorithm.getSshAlgorithmId() + " ") || line.contains(algorithm.getSshAlgorithmId() + "\t")) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean isBase64(final String value) {
 		try {
-			Base64.getDecoder().decode(nextLine);
+			Base64.getDecoder().decode(value);
 			return true;
 		} catch (@SuppressWarnings("unused") final Exception e) {
 			return false;
 		}
 	}
 
-	private static PrivateKey parseDerEncodedPrivateKey(final byte[] keyData) throws Exception {
-		final DerTag enclosingDerTag = Asn1Codec.readDerTag(keyData);
-		if (Asn1Codec.DER_TAG_SEQUENCE != enclosingDerTag.getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final List<DerTag> derDataTags = Asn1Codec.readDerTags(enclosingDerTag.getData());
+	// ---------------------------------------------------------------------------------------------
+	// PEM (OpenSSL / PKCS#8 / X.509 / OpenSSH v1)
+	// ---------------------------------------------------------------------------------------------
 
-		final BigInteger keyEncodingVersion = new BigInteger(derDataTags.get(0).getData());
+	private static SshKey readPemKey(final String pemTypeName, final TextBlock pemBlock, final Password password, final boolean publicKeyOnly) throws Exception {
+		switch (pemTypeName) {
+			case "OPENSSH PRIVATE KEY":
+				return readOpenSshv1Key(pemBlock.getData(), password, publicKeyOnly);
+			case "RSA PRIVATE KEY":
+				return readTraditionalPrivateKey("RSA", pemBlock, password, publicKeyOnly, SshKeyFormat.OpenSSL);
+			case "DSA PRIVATE KEY":
+				return readTraditionalPrivateKey("DSA", pemBlock, password, publicKeyOnly, SshKeyFormat.OpenSSL);
+			case "EC PRIVATE KEY":
+				return readTraditionalPrivateKey("EC", pemBlock, password, publicKeyOnly, SshKeyFormat.OpenSSL);
+			case "PRIVATE KEY":
+				// PKCS#8, optionally encrypted by legacy PEM encryption headers
+				return readTraditionalPrivateKey("PKCS8", pemBlock, password, publicKeyOnly, SshKeyFormat.OpenSSL);
+			case "ENCRYPTED PRIVATE KEY":
+				if (publicKeyOnly) {
+					return null;
+				} else {
+					return new SshKey(SshKeyFormat.OpenSSL, null, decryptPkcs8PrivateKey(pemBlock.getData(), password));
+				}
+			case "PUBLIC KEY":
+				return new SshKey(SshKeyFormat.OpenSSL, null, new KeyPair(parseX509PublicKey(pemBlock.getData()), null));
+			case "RSA PUBLIC KEY":
+				return new SshKey(SshKeyFormat.PKCS1, null, new KeyPair(parsePkcs1RsaPublicKey(pemBlock.getData()), null));
+			default:
+				throw new Exception("Unknown key identifier found: " + pemTypeName);
+		}
+	}
+
+	/**
+	 * Reads unencrypted or legacy encrypted ("Proc-Type: 4,ENCRYPTED") private keys.
+	 *
+	 * @param keyType "RSA", "DSA", "EC" (traditional OpenSSL formats) or "PKCS8"
+	 * @return the key, or {@code null} if an encrypted key was skipped in public key only mode
+	 */
+	private static SshKey readTraditionalPrivateKey(final String keyType, final TextBlock pemBlock, final Password password, final boolean publicKeyOnly, final SshKeyFormat keyFormat) throws Exception {
+		final boolean encrypted = "4,ENCRYPTED".equals(pemBlock.getHeader("Proc-Type"));
+		if (!encrypted) {
+			final KeyPair keyPair = parsePrivateKeyDer(keyType, pemBlock.getData());
+			return new SshKey(keyFormat, null, publicKeyOnly ? new KeyPair(keyPair.getPublic(), null) : keyPair);
+		} else if (publicKeyOnly) {
+			return null;
+		} else if (password.getPasswordChars() == null) {
+			throw new WrongPasswordException("Key is encrypted, but no password was given");
+		} else {
+			// Putty uses "ISO-8859-1" for password encoding, even for those keys stored in OpenSSHv1 and OpenSSL format
+			// "ssh-keygen" on Linux uses UTF-8 for password encoding
+			Exception lastException = null;
+			for (final byte[] passwordBytes : getPasswordByteVariants(password, true)) {
+				final byte[] decryptedData;
+				try {
+					decryptedData = decryptOpenSslKeyData(pemBlock.getData(), pemBlock.getHeader("DEK-Info"), passwordBytes);
+				} catch (final WrongPasswordException e) {
+					lastException = e;
+					continue;
+				}
+				try {
+					return new SshKey(keyFormat, null, parsePrivateKeyDer(keyType, decryptedData));
+				} catch (final Exception e) {
+					// Padding was valid by chance, but the decrypted data is garbage
+					lastException = e;
+				}
+			}
+			throw new WrongPasswordException("Missing or wrong password", lastException);
+		}
+	}
+
+	private static KeyPair parsePrivateKeyDer(final String keyType, final byte[] derData) throws Exception {
+		switch (keyType) {
+			case "RSA":
+				return parsePkcs1RsaPrivateKey(derData);
+			case "DSA":
+				return parseTraditionalDsaPrivateKey(derData);
+			case "EC":
+				return parseSec1EcPrivateKey(derData, null);
+			case "PKCS8":
+				return parsePkcs8PrivateKey(derData);
+			default:
+				throw new Exception("Unknown key type: " + keyType);
+		}
+	}
+
+	private static byte[] decryptOpenSslKeyData(final byte[] keyData, final String dekInfo, final byte[] passwordBytes) throws Exception {
+		if (dekInfo == null) {
+			throw new Exception("Missing key encryption info (DEK-Info)");
+		}
+		final String[] dekInfoParts = dekInfo.split(",");
+		if (dekInfoParts.length != 2) {
+			throw new Exception("Invalid key encryption info (DEK-Info): " + dekInfo);
+		}
+		final String keyEncryptionCipherName = dekInfoParts[0].trim().toUpperCase();
+		final byte[] iv = fromHexString(dekInfoParts[1].trim());
+
+		final String cipherName;
+		final String keyAlgorithm;
+		final int keySize;
+		final int blockSize;
+		switch (keyEncryptionCipherName) {
+			case "DES-EDE3-CBC":
+				cipherName = "DESede/CBC/NoPadding";
+				keyAlgorithm = "DESede";
+				keySize = 24;
+				blockSize = 8;
+				break;
+			case "AES-128-CBC":
+				cipherName = "AES/CBC/NoPadding";
+				keyAlgorithm = "AES";
+				keySize = 16;
+				blockSize = 16;
+				break;
+			case "AES-192-CBC":
+				cipherName = "AES/CBC/NoPadding";
+				keyAlgorithm = "AES";
+				keySize = 24;
+				blockSize = 16;
+				break;
+			case "AES-256-CBC":
+				cipherName = "AES/CBC/NoPadding";
+				keyAlgorithm = "AES";
+				keySize = 32;
+				blockSize = 16;
+				break;
+			default:
+				throw new Exception("Unknown key encryption cipher: " + keyEncryptionCipherName);
+		}
+		if (iv.length != blockSize) {
+			throw new Exception("Invalid initialization vector length " + iv.length + " for key encryption cipher " + keyEncryptionCipherName);
+		} else if (keyData.length == 0 || keyData.length % blockSize != 0) {
+			throw new Exception("Invalid encrypted key data length " + keyData.length + " for key encryption cipher " + keyEncryptionCipherName);
+		}
+
+		final byte[] key = stretchPasswordForOpenSsl(passwordBytes, iv, 8, keySize);
+		try {
+			final Cipher cipher = Cipher.getInstance(cipherName);
+			cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, keyAlgorithm), new IvParameterSpec(iv));
+			return removePkcs7Padding(cipher.doFinal(keyData), blockSize);
+		} finally {
+			Arrays.fill(key, (byte) 0);
+		}
+	}
+
+	/**
+	 * Removes and validates PKCS#5/#7 padding. An invalid padding indicates a wrong password.
+	 */
+	private static byte[] removePkcs7Padding(final byte[] data, final int blockSize) throws WrongPasswordException {
+		if (data.length == 0) {
+			throw new WrongPasswordException("Missing or wrong password (invalid padding)");
+		}
+		final int paddingSize = data[data.length - 1] & 0xFF;
+		if (paddingSize < 1 || paddingSize > blockSize || paddingSize > data.length) {
+			throw new WrongPasswordException("Missing or wrong password (invalid padding)");
+		}
+		for (int i = data.length - paddingSize; i < data.length; i++) {
+			if ((data[i] & 0xFF) != paddingSize) {
+				throw new WrongPasswordException("Missing or wrong password (invalid padding)");
+			}
+		}
+		return Arrays.copyOfRange(data, 0, data.length - paddingSize);
+	}
+
+	/**
+	 * <b>Security note:</b> This implements the legacy OpenSSL "EVP_BytesToKey" key derivation
+	 * (single MD5 round, no configurable work factor), as mandated by the classic "Proc-Type:
+	 * 4,ENCRYPTED" PEM format for backward compatibility. This scheme is inherently weak against
+	 * brute-force attacks by modern standards and has been deprecated by OpenSSL itself in favor of
+	 * encrypted PKCS#8. It cannot be strengthened here without breaking compatibility with existing
+	 * files in this legacy format; prefer PKCS#8 or OpenSSH v1 encrypted key formats where possible.
+	 */
+	static byte[] stretchPasswordForOpenSsl(final byte[] passwordBytes, final byte[] iv, final int usingIvSize, final int keySize) throws Exception {
+		final MessageDigest hash = MessageDigest.getInstance("MD5");
+		final byte[] key = new byte[keySize];
+		int keyIndex = 0;
+		byte[] previous = null;
+		while (keyIndex < keySize) {
+			if (previous != null) {
+				hash.update(previous);
+			}
+			hash.update(passwordBytes);
+			hash.update(iv, 0, usingIvSize);
+			previous = hash.digest();
+			final int bytesToCopy = Math.min(previous.length, keySize - keyIndex);
+			System.arraycopy(previous, 0, key, keyIndex, bytesToCopy);
+			keyIndex += bytesToCopy;
+		}
+		Arrays.fill(previous, (byte) 0);
+		return key;
+	}
+
+	/**
+	 * Reads a PKCS#8 "EncryptedPrivateKeyInfo" encrypted with PBES2 (PBKDF2 + AES-CBC or DES-EDE3-CBC).
+	 * <p>
+	 * The JDK implementation of PBES2 only accepts ASCII passwords, so it is implemented here directly on the password bytes.
+	 */
+	private static KeyPair decryptPkcs8PrivateKey(final byte[] derData, final Password password) throws Exception {
+		if (password.getPasswordChars() == null) {
+			throw new WrongPasswordException("Key is encrypted, but no password was given");
+		}
+
+		final List<DerTag> encryptedPrivateKeyInfoTags = readDerSequence(derData);
+		final List<DerTag> encryptionAlgorithmTags = Asn1Codec.readDerTags(getTag(encryptedPrivateKeyInfoTags, 0, Asn1Codec.DER_TAG_SEQUENCE));
+		final byte[] encryptedData = getTag(encryptedPrivateKeyInfoTags, 1, Asn1Codec.DER_TAG_OCTET_STRING);
+
+		final OID encryptionAlgorithmOid = new OID(getTag(encryptionAlgorithmTags, 0, Asn1Codec.DER_TAG_OBJECT));
+		if (!OID_PBES2.equals(encryptionAlgorithmOid)) {
+			throw new Exception("Unsupported PKCS#8 encryption algorithm (only PBES2 is supported): " + encryptionAlgorithmOid);
+		}
+		final List<DerTag> pbes2ParameterTags = Asn1Codec.readDerTags(getTag(encryptionAlgorithmTags, 1, Asn1Codec.DER_TAG_SEQUENCE));
+		final List<DerTag> keyDerivationTags = Asn1Codec.readDerTags(getTag(pbes2ParameterTags, 0, Asn1Codec.DER_TAG_SEQUENCE));
+		final List<DerTag> encryptionSchemeTags = Asn1Codec.readDerTags(getTag(pbes2ParameterTags, 1, Asn1Codec.DER_TAG_SEQUENCE));
+
+		final OID keyDerivationOid = new OID(getTag(keyDerivationTags, 0, Asn1Codec.DER_TAG_OBJECT));
+		if (OID_SCRYPT.equals(keyDerivationOid)) {
+			throw new Exception("Unsupported PKCS#8 key derivation function scrypt (only PBKDF2 is supported)");
+		} else if (!OID_PBKDF2.equals(keyDerivationOid)) {
+			throw new Exception("Unsupported PKCS#8 key derivation function (only PBKDF2 is supported): " + keyDerivationOid);
+		}
+		final List<DerTag> pbkdf2ParameterTags = Asn1Codec.readDerTags(getTag(keyDerivationTags, 1, Asn1Codec.DER_TAG_SEQUENCE));
+		final byte[] salt = getTag(pbkdf2ParameterTags, 0, Asn1Codec.DER_TAG_OCTET_STRING);
+		final BigInteger iterationCount = new BigInteger(1, getTag(pbkdf2ParameterTags, 1, Asn1Codec.DER_TAG_INTEGER));
+		if (iterationCount.signum() <= 0 || iterationCount.compareTo(BigInteger.valueOf(MAX_PBKDF2_ITERATIONS)) > 0) {
+			throw new Exception("Invalid or too large PBKDF2 iteration count " + iterationCount + " (maximum is " + MAX_PBKDF2_ITERATIONS + "). Maybe the key data is corrupted or malicious");
+		}
+		String hmacName = "HmacSHA1";
+		for (int i = 2; i < pbkdf2ParameterTags.size(); i++) {
+			// Optional keyLength (INTEGER) and prf (AlgorithmIdentifier)
+			if (pbkdf2ParameterTags.get(i).getTagId() == Asn1Codec.DER_TAG_SEQUENCE) {
+				final OID prfOid = new OID(getTag(Asn1Codec.readDerTags(pbkdf2ParameterTags.get(i).getData()), 0, Asn1Codec.DER_TAG_OBJECT));
+				if (OID_HMAC_SHA1.equals(prfOid)) {
+					hmacName = "HmacSHA1";
+				} else if (OID_HMAC_SHA224.equals(prfOid)) {
+					hmacName = "HmacSHA224";
+				} else if (OID_HMAC_SHA256.equals(prfOid)) {
+					hmacName = "HmacSHA256";
+				} else if (OID_HMAC_SHA384.equals(prfOid)) {
+					hmacName = "HmacSHA384";
+				} else if (OID_HMAC_SHA512.equals(prfOid)) {
+					hmacName = "HmacSHA512";
+				} else {
+					throw new Exception("Unsupported PBKDF2 pseudo random function: " + prfOid);
+				}
+			}
+		}
+
+		final OID encryptionSchemeOid = new OID(getTag(encryptionSchemeTags, 0, Asn1Codec.DER_TAG_OBJECT));
+		final byte[] iv = getTag(encryptionSchemeTags, 1, Asn1Codec.DER_TAG_OCTET_STRING);
+		final String cipherName;
+		final String keyAlgorithm;
+		final int keySize;
+		if (OID_AES128_CBC.equals(encryptionSchemeOid)) {
+			cipherName = "AES/CBC/NoPadding";
+			keyAlgorithm = "AES";
+			keySize = 16;
+		} else if (OID_AES192_CBC.equals(encryptionSchemeOid)) {
+			cipherName = "AES/CBC/NoPadding";
+			keyAlgorithm = "AES";
+			keySize = 24;
+		} else if (OID_AES256_CBC.equals(encryptionSchemeOid)) {
+			cipherName = "AES/CBC/NoPadding";
+			keyAlgorithm = "AES";
+			keySize = 32;
+		} else if (OID_DES_EDE3_CBC.equals(encryptionSchemeOid)) {
+			cipherName = "DESede/CBC/NoPadding";
+			keyAlgorithm = "DESede";
+			keySize = 24;
+		} else {
+			throw new Exception("Unsupported PKCS#8 encryption scheme: " + encryptionSchemeOid);
+		}
+		final int blockSize = "AES".equals(keyAlgorithm) ? 16 : 8;
+		if (iv.length != blockSize || encryptedData.length == 0 || encryptedData.length % blockSize != 0) {
+			throw new Exception("Invalid PKCS#8 encrypted data");
+		}
+
+		Exception lastException = null;
+		for (final byte[] passwordBytes : getPasswordByteVariants(password, true)) {
+			final byte[] key = pbkdf2(hmacName, passwordBytes, salt, iterationCount.intValue(), keySize);
+			try {
+				final Cipher cipher = Cipher.getInstance(cipherName);
+				cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, keyAlgorithm), new IvParameterSpec(iv));
+				final byte[] privateKeyInfo = removePkcs7Padding(cipher.doFinal(encryptedData), blockSize);
+				return parsePkcs8PrivateKey(privateKeyInfo);
+			} catch (final Exception e) {
+				lastException = e;
+			} finally {
+				Arrays.fill(key, (byte) 0);
+			}
+		}
+		throw new WrongPasswordException("Missing or wrong password", lastException);
+	}
+
+	private static byte[] pbkdf2(final String hmacName, final byte[] passwordBytes, final byte[] salt, final int iterations, final int keyLength) throws Exception {
+		final Mac mac = Mac.getInstance(hmacName);
+		// HMAC keys may be empty in PBKDF2, but SecretKeySpec does not allow empty keys
+		// HMAC pads keys with zeros, so an empty key equals a single zero byte key, which SecretKeySpec accepts
+		mac.init(new SecretKeySpec(passwordBytes.length == 0 ? new byte[1] : passwordBytes, hmacName));
+		final int hashLength = mac.getMacLength();
+		final byte[] result = new byte[keyLength];
+		final byte[] block = new byte[hashLength];
+		for (int blockIndex = 1, offset = 0; offset < keyLength; blockIndex++, offset += hashLength) {
+			mac.update(salt);
+			mac.update(new byte[] { (byte) (blockIndex >>> 24), (byte) (blockIndex >>> 16), (byte) (blockIndex >>> 8), (byte) blockIndex });
+			byte[] u = mac.doFinal();
+			System.arraycopy(u, 0, block, 0, hashLength);
+			for (int i = 1; i < iterations; i++) {
+				u = mac.doFinal(u);
+				for (int j = 0; j < hashLength; j++) {
+					block[j] ^= u[j];
+				}
+			}
+			System.arraycopy(block, 0, result, offset, Math.min(hashLength, keyLength - offset));
+		}
+		Arrays.fill(block, (byte) 0);
+		return result;
+	}
+
+	/**
+	 * Parses a PKCS#8 "PrivateKeyInfo" / "OneAsymmetricKey" structure and derives the public key.
+	 */
+	private static KeyPair parsePkcs8PrivateKey(final byte[] derData) throws Exception {
+		final List<DerTag> privateKeyInfoTags = readDerSequence(derData);
+		final BigInteger version = new BigInteger(getTag(privateKeyInfoTags, 0, Asn1Codec.DER_TAG_INTEGER));
+		if (!BigInteger.ZERO.equals(version) && !BigInteger.ONE.equals(version)) {
+			throw new Exception("Invalid PKCS#8 key data version found: " + version);
+		}
+		final List<DerTag> algorithmTags = Asn1Codec.readDerTags(getTag(privateKeyInfoTags, 1, Asn1Codec.DER_TAG_SEQUENCE));
+		final OID algorithmOid = new OID(getTag(algorithmTags, 0, Asn1Codec.DER_TAG_OBJECT));
+		final byte[] privateKeyData = getTag(privateKeyInfoTags, 2, Asn1Codec.DER_TAG_OCTET_STRING);
+
+		if (OID.RSA_ALGORITHM.equals(algorithmOid)) {
+			return parsePkcs1RsaPrivateKey(privateKeyData);
+		} else if (OID.DSA_ALGORITHM.equals(algorithmOid)) {
+			final List<DerTag> dsaParameterTags = Asn1Codec.readDerTags(getTag(algorithmTags, 1, Asn1Codec.DER_TAG_SEQUENCE));
+			final BigInteger p = new BigInteger(1, getTag(dsaParameterTags, 0, Asn1Codec.DER_TAG_INTEGER));
+			final BigInteger q = new BigInteger(1, getTag(dsaParameterTags, 1, Asn1Codec.DER_TAG_INTEGER));
+			final BigInteger g = new BigInteger(1, getTag(dsaParameterTags, 2, Asn1Codec.DER_TAG_INTEGER));
+			final BigInteger x = new BigInteger(1, getTag(Asn1Codec.readDerTags(privateKeyData), 0, Asn1Codec.DER_TAG_INTEGER));
+			return createDsaKeyPair(p, q, g, g.modPow(x, p), x);
+		} else if (OID.ECDSA_PUBLICKEY.equals(algorithmOid)) {
+			final OID curveOid = new OID(getTag(algorithmTags, 1, Asn1Codec.DER_TAG_OBJECT));
+			return parseSec1EcPrivateKey(privateKeyData, getNistCurveName(curveOid));
+		} else if (OID.EDDSA25519_ALGORITHM.equals(algorithmOid) || OID.EDDSA448_ALGORITHM.equals(algorithmOid)) {
+			final String curveName = OID.EDDSA25519_ALGORITHM.equals(algorithmOid) ? "Ed25519" : "Ed448";
+			final byte[] seed = getTag(Asn1Codec.readDerTags(privateKeyData), 0, Asn1Codec.DER_TAG_OCTET_STRING);
+			final PrivateKey privateKey = createEdDsaPrivateKey(seed, curveName);
+			final PublicKey publicKey = createEdDsaPublicKey(deriveEdDsaPublicKeyBytes(seed, curveName), curveName);
+			return new KeyPair(publicKey, privateKey);
+		} else {
+			throw new Exception("Unknown ssh algorithm OID: " + algorithmOid);
+		}
+	}
+
+	/**
+	 * Parses a PKCS#1 "RSAPrivateKey" structure (traditional "RSA PRIVATE KEY").
+	 */
+	private static KeyPair parsePkcs1RsaPrivateKey(final byte[] derData) throws Exception {
+		final List<DerTag> derDataTags = readDerSequence(derData);
+		final BigInteger keyEncodingVersion = new BigInteger(getTag(derDataTags, 0, Asn1Codec.DER_TAG_INTEGER));
+		if (!BigInteger.ZERO.equals(keyEncodingVersion)) {
+			throw new Exception("Invalid or unsupported (multi prime) RSA key data version found: " + keyEncodingVersion);
+		}
+		final BigInteger modulus = new BigInteger(1, getTag(derDataTags, 1, Asn1Codec.DER_TAG_INTEGER));
+		final BigInteger publicExponent = new BigInteger(1, getTag(derDataTags, 2, Asn1Codec.DER_TAG_INTEGER));
+		final BigInteger privateExponent = new BigInteger(1, getTag(derDataTags, 3, Asn1Codec.DER_TAG_INTEGER));
+		final BigInteger primeP = new BigInteger(1, getTag(derDataTags, 4, Asn1Codec.DER_TAG_INTEGER));
+		final BigInteger primeQ = new BigInteger(1, getTag(derDataTags, 5, Asn1Codec.DER_TAG_INTEGER));
+		final BigInteger primeExponentP = new BigInteger(1, getTag(derDataTags, 6, Asn1Codec.DER_TAG_INTEGER));
+		final BigInteger primeExponentQ = new BigInteger(1, getTag(derDataTags, 7, Asn1Codec.DER_TAG_INTEGER));
+		final BigInteger crtCoefficient = new BigInteger(1, getTag(derDataTags, 8, Asn1Codec.DER_TAG_INTEGER));
+
+		final KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+		final PublicKey publicKey = keyFactory.generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
+		final PrivateKey privateKey = keyFactory.generatePrivate(new RSAPrivateCrtKeySpec(modulus, publicExponent, privateExponent, primeP, primeQ, primeExponentP, primeExponentQ, crtCoefficient));
+		return new KeyPair(publicKey, privateKey);
+	}
+
+	/**
+	 * Parses the traditional OpenSSL "DSA PRIVATE KEY" structure.
+	 */
+	private static KeyPair parseTraditionalDsaPrivateKey(final byte[] derData) throws Exception {
+		final List<DerTag> derDataTags = readDerSequence(derData);
+		final BigInteger keyEncodingVersion = new BigInteger(getTag(derDataTags, 0, Asn1Codec.DER_TAG_INTEGER));
 		if (!BigInteger.ZERO.equals(keyEncodingVersion)) {
 			throw new Exception("Invalid key data version found");
 		}
+		final BigInteger p = new BigInteger(1, getTag(derDataTags, 1, Asn1Codec.DER_TAG_INTEGER));
+		final BigInteger q = new BigInteger(1, getTag(derDataTags, 2, Asn1Codec.DER_TAG_INTEGER));
+		final BigInteger g = new BigInteger(1, getTag(derDataTags, 3, Asn1Codec.DER_TAG_INTEGER));
+		final BigInteger y = new BigInteger(1, getTag(derDataTags, 4, Asn1Codec.DER_TAG_INTEGER));
+		final BigInteger x = new BigInteger(1, getTag(derDataTags, 5, Asn1Codec.DER_TAG_INTEGER));
+		return createDsaKeyPair(p, q, g, y, x);
+	}
 
-		if (Asn1Codec.DER_TAG_SEQUENCE != derDataTags.get(1).getTagId()) {
-			throw new Exception("Invalid key data found");
+	private static KeyPair createDsaKeyPair(final BigInteger p, final BigInteger q, final BigInteger g, final BigInteger y, final BigInteger x) throws Exception {
+		final KeyFactory keyFactory = KeyFactory.getInstance("DSA");
+		final PublicKey publicKey = keyFactory.generatePublic(new DSAPublicKeySpec(y, p, q, g));
+		final PrivateKey privateKey = keyFactory.generatePrivate(new DSAPrivateKeySpec(x, p, q, g));
+		return new KeyPair(publicKey, privateKey);
+	}
+
+	/**
+	 * Parses a SEC1 / RFC 5915 "ECPrivateKey" structure.
+	 *
+	 * @param outerCurveName curve name from an enclosing PKCS#8 structure, or {@code null} if the curve must be defined in the structure itself
+	 */
+	private static KeyPair parseSec1EcPrivateKey(final byte[] derData, final String outerCurveName) throws Exception {
+		final List<DerTag> derDataTags = readDerSequence(derData);
+		final BigInteger keyEncodingVersion = new BigInteger(getTag(derDataTags, 0, Asn1Codec.DER_TAG_INTEGER));
+		if (!BigInteger.ONE.equals(keyEncodingVersion)) {
+			throw new Exception("Invalid key data version found");
 		}
-		final List<DerTag> sshAlgorithmDerTags = Asn1Codec.readDerTags(derDataTags.get(1).getData());
-		final OID sshAlgorithmOid = new OID(sshAlgorithmDerTags.get(0).getData());
-		if (Arrays.equals(OID.EDDSA25519_ALGORITHM_ARRAY, sshAlgorithmOid.getByteArrayEncoding())) {
-			if (Asn1Codec.DER_TAG_OCTET_STRING != derDataTags.get(2).getTagId()) {
-				throw new Exception("Invalid key data found");
-			} else {
-				final List<DerTag> privateKeyTags = Asn1Codec.readDerTags(derDataTags.get(2).getData());
-				if (Asn1Codec.DER_TAG_OCTET_STRING != privateKeyTags.get(0).getTagId()) {
-					throw new Exception("Invalid key data found");
-				} else {
-					final byte[] privateKeyBytes = privateKeyTags.get(0).getData();
-					final PrivateKey privateKey = KeyFactory.getInstance("Ed25519").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed25519"), privateKeyBytes));
-					return privateKey;
+		// The private key is an unsigned big-endian octet string
+		final BigInteger s = new BigInteger(1, getTag(derDataTags, 1, Asn1Codec.DER_TAG_OCTET_STRING));
+
+		String curveName = outerCurveName;
+		byte[] publicKeyBytes = null;
+		for (int i = 2; i < derDataTags.size(); i++) {
+			if (derDataTags.get(i).getTagId() == Asn1Codec.DER_TAG_CONTEXT_SPECIFIC_0) {
+				final DerTag oidTag = Asn1Codec.readDerTag(derDataTags.get(i).getData());
+				if (Asn1Codec.DER_TAG_OBJECT != oidTag.getTagId()) {
+					throw new Exception("Unsupported explicit ec curve parameters found");
 				}
-			}
-		} else if (Arrays.equals(OID.EDDSA448_ALGORITHM_ARRAY, sshAlgorithmOid.getByteArrayEncoding())) {
-			if (Asn1Codec.DER_TAG_OCTET_STRING != derDataTags.get(2).getTagId()) {
-				throw new Exception("Invalid key data found");
-			} else {
-				final List<DerTag> privateKeyTags = Asn1Codec.readDerTags(derDataTags.get(2).getData());
-				if (Asn1Codec.DER_TAG_OCTET_STRING != privateKeyTags.get(0).getTagId()) {
-					throw new Exception("Invalid key data found");
-				} else {
-					final byte[] privateKeyBytes = privateKeyTags.get(0).getData();
-					final PrivateKey privateKey = KeyFactory.getInstance("Ed448").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed448"), privateKeyBytes));
-					return privateKey;
+				final String innerCurveName = getNistCurveName(new OID(oidTag.getData()));
+				if (curveName != null && !curveName.equals(innerCurveName)) {
+					throw new Exception("Inconsistent ec curve definitions found");
 				}
+				curveName = innerCurveName;
+			} else if (derDataTags.get(i).getTagId() == Asn1Codec.DER_TAG_CONTEXT_SPECIFIC_1) {
+				final DerTag publicKeyTag = Asn1Codec.readDerTag(derDataTags.get(i).getData());
+				final byte[] bitStringData = publicKeyTag.getData();
+				if (Asn1Codec.DER_TAG_BIT_STRING != publicKeyTag.getTagId() || bitStringData.length < 2 || bitStringData[0] != 0) {
+					throw new Exception("Invalid ec public key data found");
+				}
+				// Remove the "unused bits" prefix byte of the bit string
+				publicKeyBytes = Arrays.copyOfRange(bitStringData, 1, bitStringData.length);
 			}
+		}
+		if (curveName == null) {
+			throw new Exception("Missing ec curve definition");
+		}
+
+		final PrivateKey privateKey = createEcPrivateKey(s, curveName);
+		final PublicKey publicKey;
+		if (publicKeyBytes != null) {
+			publicKey = createEcPublicKey(publicKeyBytes, curveName);
 		} else {
-			throw new Exception("Unknown ssh algorithm OID: " + sshAlgorithmOid.getStringEncoding());
+			publicKey = deriveEcPublicKey(s, curveName);
 		}
+		return new KeyPair(publicKey, privateKey);
 	}
 
-	private static Map<String, String> readUpToLine(final BufferedReader dataReader, final String endLine) throws Exception {
-		try {
-			final Map<String, String> keyProperties = new HashMap<>();
-			String nextLine;
-			while ((nextLine = dataReader.readLine()) != null) {
-				if (endLine.equals(nextLine)) {
-					return keyProperties;
-				} else {
-					final int indexOfHeaderSeparator = nextLine.indexOf(": ");
-					if (indexOfHeaderSeparator > 0) {
-						// Headers must be at start of key data
-						if (keyProperties.get(null) != null && keyProperties.get(null).length() > 0) {
-							throw new Exception("Corrupt key data found: Headers found after keydata start");
-						} else {
-							final String headerName = nextLine.substring(0, indexOfHeaderSeparator).trim();
-							keyProperties.put(headerName, nextLine.substring(indexOfHeaderSeparator + 2));
-						}
-					} else {
-						if (keyProperties.get(null) == null) {
-							keyProperties.put(null, "");
-						}
-						keyProperties.put(null, keyProperties.get(null) + nextLine);
-					}
-				}
-			}
-			throw new Exception("Corrupt key data found: End line is missing: '" + endLine + "'");
-		} catch (final IOException e) {
-			throw new Exception("Corrupt key data found", e);
-		}
-	}
-
-	private static Map<String, String> readPuttyKeyProperties(final BufferedReader dataReader) throws Exception {
-		try {
-			final Map<String, String> keyProperties = new HashMap<>();
-			String nextLine;
-			while ((nextLine = dataReader.readLine()) != null) {
-				final int indexOfHeaderSeparator = nextLine.indexOf(": ");
-				if (indexOfHeaderSeparator > 0) {
-					final String headerName = nextLine.substring(0, indexOfHeaderSeparator).trim();
-					if ("Public-Lines".equals(headerName) || "Private-Lines".equals(headerName)) {
-						final int numberOfLines = Integer.parseInt(nextLine.substring(indexOfHeaderSeparator + 2));
-						final StringBuilder value = new StringBuilder();
-						for (int i = 0; i < numberOfLines; i++) {
-							if ((nextLine = dataReader.readLine()) != null) {
-								value.append(nextLine);
-							} else {
-								throw new Exception("Corrupt key data found: Missing some lines for '" + headerName + "'");
-							}
-						}
-						keyProperties.put(headerName, value.toString());
-					} else {
-						// Watchout for Comment values correct encoding, because it is part of the MAC checksum
-						keyProperties.put(headerName, nextLine.substring(indexOfHeaderSeparator + 2));
-					}
-				} else if (isNotBlank(nextLine)) {
-					throw new Exception("Corrupt key data found: Unexpected line: '" + nextLine + "'");
-				}
-			}
-			return keyProperties;
-		} catch (final IOException e) {
-			throw new Exception("Corrupt key data found", e);
-		}
-	}
-
-	private static byte[] decryptOpenSslKeyData(byte[] keyData, final String dekInfo, final Password password, final Charset passwordCharset) throws Exception {
-		if (password == null || password.getPasswordChars() == null) {
-			throw new WrongPasswordException();
-		} else if (dekInfo == null) {
-			throw new Exception("Missing key encryption info (DEK-Info)");
+	private static PublicKey parseX509PublicKey(final byte[] derData) throws Exception {
+		final List<DerTag> subjectPublicKeyInfoTags = readDerSequence(derData);
+		final List<DerTag> algorithmTags = Asn1Codec.readDerTags(getTag(subjectPublicKeyInfoTags, 0, Asn1Codec.DER_TAG_SEQUENCE));
+		final OID algorithmOid = new OID(getTag(algorithmTags, 0, Asn1Codec.DER_TAG_OBJECT));
+		final X509EncodedKeySpec keySpec = new X509EncodedKeySpec(derData);
+		if (OID.RSA_ALGORITHM.equals(algorithmOid)) {
+			return KeyFactory.getInstance("RSA").generatePublic(keySpec);
+		} else if (OID.DSA_ALGORITHM.equals(algorithmOid)) {
+			return KeyFactory.getInstance("DSA").generatePublic(keySpec);
+		} else if (OID.ECDSA_PUBLICKEY.equals(algorithmOid)) {
+			// Check for supported curve
+			getNistCurveName(new OID(getTag(algorithmTags, 1, Asn1Codec.DER_TAG_OBJECT)));
+			return KeyFactory.getInstance("EC", BC_PROVIDER).generatePublic(keySpec);
+		} else if (OID.EDDSA25519_ALGORITHM.equals(algorithmOid)) {
+			return KeyFactory.getInstance("Ed25519").generatePublic(keySpec);
+		} else if (OID.EDDSA448_ALGORITHM.equals(algorithmOid)) {
+			return KeyFactory.getInstance("Ed448").generatePublic(keySpec);
 		} else {
-			final String[] dekInfoParts = dekInfo.split(",");
-			if (dekInfoParts.length < 2) {
-				throw new Exception("Invalid key encryption info (DEK-Info)");
+			throw new Exception("Unknown ssh algorithm OID: " + algorithmOid);
+		}
+	}
+
+	private static PublicKey parsePkcs1RsaPublicKey(final byte[] derData) throws Exception {
+		final List<DerTag> derDataTags = readDerSequence(derData);
+		final BigInteger modulus = new BigInteger(1, getTag(derDataTags, 0, Asn1Codec.DER_TAG_INTEGER));
+		final BigInteger publicExponent = new BigInteger(1, getTag(derDataTags, 1, Asn1Codec.DER_TAG_INTEGER));
+		return KeyFactory.getInstance("RSA").generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
+	}
+
+	private static List<DerTag> readDerSequence(final byte[] derData) throws Exception {
+		final DerTag enclosingDerTag = Asn1Codec.readDerTag(derData);
+		if (Asn1Codec.DER_TAG_SEQUENCE != enclosingDerTag.getTagId()) {
+			throw new Exception("Invalid key data found: Missing enclosing sequence");
+		}
+		return Asn1Codec.readDerTags(enclosingDerTag.getData());
+	}
+
+	private static byte[] getTag(final List<DerTag> derTags, final int index, final int expectedTagId) throws Exception {
+		if (derTags.size() <= index) {
+			throw new Exception("Invalid key data found: Missing data element " + index);
+		} else if (derTags.get(index).getTagId() != expectedTagId) {
+			throw new Exception("Invalid key data found: Unexpected data element type " + derTags.get(index).getTagId() + " at index " + index + " (expected " + expectedTagId + ")");
+		} else {
+			return derTags.get(index).getData();
+		}
+	}
+
+	private static String getNistCurveName(final OID curveOid) throws Exception {
+		if (OID.ECDSA_CURVE_NISTP256.equals(curveOid)) {
+			return "nistp256";
+		} else if (OID.ECDSA_CURVE_NISTP384.equals(curveOid)) {
+			return "nistp384";
+		} else if (OID.ECDSA_CURVE_NISTP521.equals(curveOid)) {
+			return "nistp521";
+		} else {
+			throw new Exception("Unsupported ec curve oid found: " + curveOid);
+		}
+	}
+
+	/**
+	 * Reads the content of a PEM block up to the given end line.
+	 * Headers (RFC 1421, continuation lines start with whitespace) are only allowed before the base64 data.
+	 */
+	private static TextBlock readPemBlock(final BufferedReader dataReader, final String endLine) throws Exception {
+		final TextBlock textBlock = new TextBlock();
+		final StringBuilder base64Data = new StringBuilder();
+		String lastHeaderName = null;
+		String nextLine;
+		while ((nextLine = dataReader.readLine()) != null) {
+			if (endLine.equals(nextLine.trim())) {
+				if (base64Data.length() == 0) {
+					throw new Exception("Corrupt key data found: Missing key data");
+				}
+				textBlock.setData(Base64.getMimeDecoder().decode(base64Data.toString()));
+				return textBlock;
+			} else if (base64Data.length() == 0 && lastHeaderName != null && !nextLine.isEmpty() && Character.isWhitespace(nextLine.charAt(0))) {
+				textBlock.appendToHeader(lastHeaderName, nextLine.trim());
+			} else if (nextLine.indexOf(':') > 0) {
+				if (base64Data.length() > 0) {
+					throw new Exception("Corrupt key data found: Headers found after keydata start");
+				}
+				lastHeaderName = nextLine.substring(0, nextLine.indexOf(':')).trim();
+				textBlock.setHeader(lastHeaderName, nextLine.substring(nextLine.indexOf(':') + 1).trim());
 			} else {
+				base64Data.append(nextLine.trim());
+			}
+		}
+		throw new Exception("Corrupt key data found: End line is missing: '" + endLine + "'");
+	}
+
+	/**
+	 * Reads the content of a RFC 4716 block up to the given end line.
+	 * Header continuation lines end with a backslash, header values may be enclosed in double quotes.
+	 */
+	private static TextBlock readRfc4716Block(final BufferedReader dataReader, final String endLine) throws Exception {
+		final TextBlock textBlock = new TextBlock();
+		final StringBuilder base64Data = new StringBuilder();
+		String nextLine;
+		while ((nextLine = dataReader.readLine()) != null) {
+			nextLine = nextLine.trim();
+			if (endLine.equals(nextLine)) {
+				if (base64Data.length() == 0) {
+					throw new Exception("Corrupt key data found: Missing key data");
+				}
+				textBlock.setData(Base64.getMimeDecoder().decode(base64Data.toString()));
+				return textBlock;
+			} else if (nextLine.indexOf(':') > 0 && base64Data.length() == 0) {
+				final String headerName = nextLine.substring(0, nextLine.indexOf(':')).trim();
+				final StringBuilder headerValue = new StringBuilder(nextLine.substring(nextLine.indexOf(':') + 1).trim());
+				while (headerValue.length() > 0 && headerValue.charAt(headerValue.length() - 1) == '\\') {
+					headerValue.setLength(headerValue.length() - 1);
+					final String continuationLine = dataReader.readLine();
+					if (continuationLine == null) {
+						throw new Exception("Corrupt key data found: Missing header continuation line");
+					}
+					headerValue.append(continuationLine.trim());
+				}
+				String value = headerValue.toString();
+				if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+					value = value.substring(1, value.length() - 1);
+				}
+				textBlock.setHeader(headerName, value);
+			} else if (nextLine.indexOf(':') > 0) {
+				throw new Exception("Corrupt key data found: Headers found after keydata start");
+			} else {
+				base64Data.append(nextLine);
+			}
+		}
+		throw new Exception("Corrupt key data found: End line is missing: '" + endLine + "'");
+	}
+
+	private static class TextBlock {
+		private final Map<String, String> headers = new LinkedHashMap<>();
+		private byte[] data;
+
+		private void setHeader(final String name, final String value) {
+			headers.put(name.toLowerCase(), value);
+		}
+
+		private void appendToHeader(final String name, final String value) {
+			headers.put(name.toLowerCase(), headers.get(name.toLowerCase()) + value);
+		}
+
+		private String getHeader(final String name) {
+			return headers.get(name.toLowerCase());
+		}
+
+		private byte[] getData() {
+			return data;
+		}
+
+		private void setData(final byte[] data) {
+			this.data = data;
+		}
+	}
+
+	// ---------------------------------------------------------------------------------------------
+	// OpenSSH v1
+	// ---------------------------------------------------------------------------------------------
+
+	private static SshKey readOpenSshv1Key(final byte[] data, final Password password, final boolean publicKeyOnly) throws Exception {
+		final BlockDataReader dataReader = new BlockDataReader(data);
+		// Storage format name
+		final String keyFormatString = new String(dataReader.readZeroLimitedData(32), StandardCharsets.UTF_8);
+		if (!"openssh-key-v1".equals(keyFormatString)) {
+			throw new Exception("Invalid keyFormat name '" + keyFormatString + "' found. Expected 'openssh-key-v1'");
+		}
+
+		final String encryptionCipherName = dataReader.readString();
+		final String kdfName = dataReader.readString();
+		final byte[] kdfInfoBytes = dataReader.readData();
+
+		// Amount of stored keys
+		final int amountOfKeys = dataReader.readSimpleInt();
+		if (amountOfKeys != 1) {
+			throw new Exception("Invalid amountOfKeys " + amountOfKeys + " found. Expected 1");
+		}
+
+		// Public key
+		final PublicKey publicKey = parsePublicKeyBytes(dataReader.readData());
+		if (publicKeyOnly) {
+			return new SshKey(SshKeyFormat.OpenSSHv1, null, new KeyPair(publicKey, null));
+		}
+
+		// Private key
+		byte[] privateKeyDataBytes = dataReader.readData();
+		if (dataReader.isMoreDataAvailable()) {
+			throw new Exception("Invalid key data: unexpected trailing data found");
+		}
+
+		if (!"none".equals(encryptionCipherName)) {
+			final OpenSshCipher openSshCipher = OpenSshCipher.getByName(encryptionCipherName);
+			if (!"bcrypt".equals(kdfName)) {
+				throw new Exception("Invalid key derivation function method (Only 'bcrypt' allowed) '" + kdfName + "'");
+			}
+			final BlockDataReader kdfInfoReader = new BlockDataReader(kdfInfoBytes);
+			final byte[] kdfSalt = kdfInfoReader.readData();
+			final int kdfRounds = kdfInfoReader.readSimpleInt();
+			if (kdfSalt.length == 0) {
+				throw new Exception("Invalid key derivation function info 'kdfSalt' for key derivation function '" + kdfName + "'");
+			} else if (kdfRounds <= 0) {
+				throw new Exception("Invalid key derivation function info 'kdfRounds = " + kdfRounds + "' for key derivation function '" + kdfName + "'");
+			} else if (kdfRounds > MAX_BCRYPT_KDF_ROUNDS) {
+				throw new Exception("Key derivation function info 'kdfRounds = " + kdfRounds + "' exceeds maximum allowed value of " + MAX_BCRYPT_KDF_ROUNDS + " for key derivation function '" + kdfName + "'. Maybe the key data is corrupted or malicious");
+			} else if (privateKeyDataBytes.length < 8 || privateKeyDataBytes.length % openSshCipher.blockSize != 0) {
+				throw new Exception("Invalid encrypted private key data length " + privateKeyDataBytes.length);
+			} else if (password.getPasswordChars() == null) {
+				throw new WrongPasswordException("Key is encrypted, but no password was given");
+			}
+
+			// Putty uses "ISO-8859-1" for password encoding, even for those keys stored in OpenSSHv1 and OpenSSL format
+			// "ssh-keygen" on Linux uses UTF-8 for password encoding
+			byte[] decryptedPrivateKeyDataBytes = null;
+			for (final byte[] passwordBytes : getPasswordByteVariants(password, true)) {
+				final byte[] derivedKeyBytes = new byte[openSshCipher.keySize + 16];
 				try {
-					final String keyEncryptionCipherName = dekInfoParts[0].trim();
-					final String ivString = dekInfoParts[1].trim();
-					if ("DES-EDE3-CBC".equalsIgnoreCase(keyEncryptionCipherName)) {
-						final byte[] iv = fromHexString(ivString);
-						final Cipher cipher = Cipher.getInstance("DESede/CBC/NoPadding");
-						cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(stretchPasswordForOpenSsl(password, iv, 8, 24, passwordCharset), "DESede"), new IvParameterSpec(iv));
-						keyData = cipher.doFinal(keyData);
-					} else if ("AES-128-CBC".equalsIgnoreCase(keyEncryptionCipherName)) {
-						final byte[] iv = fromHexString(ivString);
-						final Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
-						cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(stretchPasswordForOpenSsl(password, iv, 8, 16, passwordCharset), "AES"), new IvParameterSpec(iv));
-						keyData = cipher.doFinal(keyData);
-					} else {
-						throw new Exception("Unknown key encryption cipher: " + keyEncryptionCipherName);
+					new BCryptPBKDF().derivePassword(passwordBytes, kdfSalt, kdfRounds, derivedKeyBytes);
+					final Cipher cipher = Cipher.getInstance(openSshCipher.javaCipherName);
+					cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(derivedKeyBytes, 0, openSshCipher.keySize, "AES"), new IvParameterSpec(derivedKeyBytes, openSshCipher.keySize, 16));
+					final byte[] candidate = cipher.doFinal(privateKeyDataBytes);
+					if (checkIntsMatch(candidate)) {
+						decryptedPrivateKeyDataBytes = candidate;
+						break;
 					}
-
-					keyData = removeLengthCodedPadding(keyData);
-					return keyData;
-				} catch (final Exception e) {
-					throw new Exception("Cannot decrypt key data", e);
+				} finally {
+					Arrays.fill(derivedKeyBytes, (byte) 0);
 				}
 			}
+			if (decryptedPrivateKeyDataBytes == null) {
+				throw new WrongPasswordException();
+			}
+			privateKeyDataBytes = decryptedPrivateKeyDataBytes;
+		} else if (!"none".equals(kdfName)) {
+			throw new Exception("Invalid key derivation function '" + kdfName + "' for unencrypted key");
+		}
+
+		final SshKey sshKey = readOpenSshv1PrivateKey(privateKeyDataBytes);
+		if (!Arrays.equals(publicKey.getEncoded(), sshKey.getKeyPair().getPublic().getEncoded())) {
+			throw new Exception("Invalid key data: public key and public key data of the private key section do not match");
+		}
+		return sshKey;
+	}
+
+	private static boolean checkIntsMatch(final byte[] privateKeyData) {
+		return privateKeyData.length >= 8
+				&& privateKeyData[0] == privateKeyData[4]
+				&& privateKeyData[1] == privateKeyData[5]
+				&& privateKeyData[2] == privateKeyData[6]
+				&& privateKeyData[3] == privateKeyData[7];
+	}
+
+	private enum OpenSshCipher {
+		AES128_CTR("aes128-ctr", "AES/CTR/NoPadding", 16),
+		AES192_CTR("aes192-ctr", "AES/CTR/NoPadding", 24),
+		AES256_CTR("aes256-ctr", "AES/CTR/NoPadding", 32),
+		AES128_CBC("aes128-cbc", "AES/CBC/NoPadding", 16),
+		AES192_CBC("aes192-cbc", "AES/CBC/NoPadding", 24),
+		AES256_CBC("aes256-cbc", "AES/CBC/NoPadding", 32);
+
+		private final String sshName;
+		private final String javaCipherName;
+		private final int keySize;
+		private final int blockSize = 16;
+
+		OpenSshCipher(final String sshName, final String javaCipherName, final int keySize) {
+			this.sshName = sshName;
+			this.javaCipherName = javaCipherName;
+			this.keySize = keySize;
+		}
+
+		private static OpenSshCipher getByName(final String name) throws Exception {
+			for (final OpenSshCipher openSshCipher : values()) {
+				if (openSshCipher.sshName.equals(name)) {
+					return openSshCipher;
+				}
+			}
+			throw new Exception("Unsupported key encryption cipher '" + name + "' (supported: aes128/192/256-ctr, aes128/192/256-cbc)");
 		}
 	}
 
-	private static PublicKey parsePublicKeyBytes(final byte[] data) throws Exception {
+	private static SshKey readOpenSshv1PrivateKey(final byte[] privateKeyData) throws Exception {
+		final BlockDataReader privateKeyDataReader = new BlockDataReader(privateKeyData);
+		// Quick decryption validity check. Both checkInts must match.
+		final int checkInt1 = privateKeyDataReader.readSimpleInt();
+		final int checkInt2 = privateKeyDataReader.readSimpleInt();
+		if (checkInt1 != checkInt2) {
+			throw new WrongPasswordException();
+		}
+
+		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(privateKeyDataReader.readString());
+		final KeyPair keyPair;
+		if (Algorithm.RSA == algorithm) {
+			final BigInteger modulus = privateKeyDataReader.readBigInt();
+			final BigInteger publicExponent = privateKeyDataReader.readBigInt();
+			final BigInteger privateExponent = privateKeyDataReader.readBigInt();
+			final BigInteger crtCoefficient = privateKeyDataReader.readBigInt();
+			final BigInteger primeP = privateKeyDataReader.readBigInt();
+			final BigInteger primeQ = privateKeyDataReader.readBigInt();
+			keyPair = createRsaKeyPair(modulus, publicExponent, privateExponent, primeP, primeQ, crtCoefficient);
+		} else if (Algorithm.DSA == algorithm) {
+			final BigInteger p = privateKeyDataReader.readBigInt();
+			final BigInteger q = privateKeyDataReader.readBigInt();
+			final BigInteger g = privateKeyDataReader.readBigInt();
+			final BigInteger y = privateKeyDataReader.readBigInt();
+			final BigInteger x = privateKeyDataReader.readBigInt();
+			keyPair = createDsaKeyPair(p, q, g, y, x);
+		} else if (Algorithm.NISTP256 == algorithm || Algorithm.NISTP384 == algorithm || Algorithm.NISTP521 == algorithm) {
+			final String ecdsaCurveName = privateKeyDataReader.readString();
+			checkCurveNameMatchesAlgorithm(ecdsaCurveName, algorithm);
+			final PublicKey publicKey = createEcPublicKey(privateKeyDataReader.readData(), ecdsaCurveName);
+			final PrivateKey privateKey = createEcPrivateKey(privateKeyDataReader.readBigInt(), ecdsaCurveName);
+			keyPair = new KeyPair(publicKey, privateKey);
+		} else if (Algorithm.ED25519 == algorithm || Algorithm.ED448 == algorithm) {
+			final String curveName = Algorithm.ED25519 == algorithm ? "Ed25519" : "Ed448";
+			final int keyLength = Algorithm.ED25519 == algorithm ? 32 : 57;
+			final byte[] publicKeyBytes = privateKeyDataReader.readData();
+			final byte[] secretKeyBytes = privateKeyDataReader.readData();
+			if (publicKeyBytes.length != keyLength || secretKeyBytes.length != 2 * keyLength) {
+				throw new Exception("Invalid " + curveName + " key data length");
+			}
+			if (!Arrays.equals(publicKeyBytes, Arrays.copyOfRange(secretKeyBytes, keyLength, 2 * keyLength))) {
+				throw new Exception("Invalid " + curveName + " key data: inconsistent public key data");
+			}
+			final PrivateKey privateKey = createEdDsaPrivateKey(Arrays.copyOfRange(secretKeyBytes, 0, keyLength), curveName);
+			Arrays.fill(secretKeyBytes, (byte) 0);
+			keyPair = new KeyPair(createEdDsaPublicKey(publicKeyBytes, curveName), privateKey);
+		} else {
+			throw new Exception("Unexpected key type '" + algorithm.name() + "'");
+		}
+
+		final String keyComment = decodeComment(privateKeyDataReader.readData());
+
+		final byte[] paddingBytes = privateKeyDataReader.readLeftoverData();
+		for (int i = 0; i < paddingBytes.length; i++) {
+			if (paddingBytes[i] != (byte) (i + 1)) {
+				throw new Exception("Invalid private key padding found");
+			}
+		}
+
+		return new SshKey(SshKeyFormat.OpenSSHv1, keyComment, keyPair);
+	}
+
+	// ---------------------------------------------------------------------------------------------
+	// SSH wire format public keys
+	// ---------------------------------------------------------------------------------------------
+
+	/**
+	 * Parses a public key in SSH wire format (RFC 4253 / RFC 5656 / RFC 8709) as used in OpenSSH public keys, authorized_keys, RFC 4716 and PuTTY keys.
+	 */
+	static PublicKey parsePublicKeyBytes(final byte[] data) throws Exception {
 		final BlockDataReader publicKeyReader = new BlockDataReader(data);
-		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(new String(publicKeyReader.readData(), StandardCharsets.UTF_8));
+		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(publicKeyReader.readString());
+		final PublicKey publicKey;
 		if (Algorithm.RSA == algorithm) {
 			final BigInteger publicExponent = publicKeyReader.readBigInt();
 			final BigInteger modulus = publicKeyReader.readBigInt();
-
-			final KeyFactory keyFactory = KeyFactory.getInstance("RSA");
-			return keyFactory.generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
+			publicKey = KeyFactory.getInstance("RSA").generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
 		} else if (Algorithm.DSA == algorithm) {
 			final BigInteger p = publicKeyReader.readBigInt();
 			final BigInteger q = publicKeyReader.readBigInt();
 			final BigInteger g = publicKeyReader.readBigInt();
-
 			final BigInteger y = publicKeyReader.readBigInt();
-
-			final KeyFactory keyFactory = KeyFactory.getInstance("DSA");
-			return keyFactory.generatePublic(new DSAPublicKeySpec(y, p, q, g));
-		} else if (Algorithm.NISTP256 == algorithm
-				|| Algorithm.NISTP384 == algorithm
-				|| Algorithm.NISTP521 == algorithm) {
-			final String ecdsaCurveName = new String(publicKeyReader.readData(), StandardCharsets.UTF_8);
-			if (!"nistp256".equals(ecdsaCurveName)
-					&& !"nistp384".equals(ecdsaCurveName)
-					&& !"nistp521".equals(ecdsaCurveName)) {
-				throw new Exception("Unsupported ECDSA curveName: " + ecdsaCurveName);
-			} else {
-				final byte[] eccKeyBlobBytes = publicKeyReader.readData();
-
-				Security.addProvider(new BouncyCastleProvider());
-				final KeyFactory keyFactory = KeyFactory.getInstance("EC", BouncyCastleProvider.PROVIDER_NAME);
-				final org.bouncycastle.jce.spec.ECNamedCurveParameterSpec ecSpec = ECNamedCurveTable.getParameterSpec(ecdsaCurveName.replace("nist", "sec") + "r1");
-				final org.bouncycastle.math.ec.ECPoint point = ecSpec.getCurve().decodePoint(eccKeyBlobBytes);
-				final org.bouncycastle.jce.spec.ECPublicKeySpec pubSpec = new org.bouncycastle.jce.spec.ECPublicKeySpec(point, ecSpec);
-				final PublicKey publicKey = keyFactory.generatePublic(pubSpec);
-				return publicKey;
-			}
+			publicKey = KeyFactory.getInstance("DSA").generatePublic(new DSAPublicKeySpec(y, p, q, g));
+		} else if (Algorithm.NISTP256 == algorithm || Algorithm.NISTP384 == algorithm || Algorithm.NISTP521 == algorithm) {
+			final String ecdsaCurveName = publicKeyReader.readString();
+			checkCurveNameMatchesAlgorithm(ecdsaCurveName, algorithm);
+			publicKey = createEcPublicKey(publicKeyReader.readData(), ecdsaCurveName);
 		} else if (Algorithm.ED25519 == algorithm) {
-			final byte[] edDsaPublicKeyData = publicKeyReader.readData();
-
-			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
-			final boolean xOdd = (mostSignificantByte & 0x80) != 0;
-			edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-			reverseArray(edDsaPublicKeyData);
-
-			final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
-			final EdECPoint edECPoint = new EdECPoint(xOdd, y);
-
-			final PublicKey publicKey = KeyFactory.getInstance("Ed25519").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed25519"), edECPoint));
-			return publicKey;
+			publicKey = createEdDsaPublicKey(publicKeyReader.readData(), "Ed25519");
 		} else if (Algorithm.ED448 == algorithm) {
-			final byte[] edDsaPublicKeyData = publicKeyReader.readData();
-
-			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
-			final boolean xOdd = (mostSignificantByte & 0x80) != 0;
-			edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-			reverseArray(edDsaPublicKeyData);
-
-			final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
-			final EdECPoint edECPoint = new EdECPoint(xOdd, y);
-
-			final PublicKey publicKey = KeyFactory.getInstance("Ed448").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed448"), edECPoint));
-			return publicKey;
+			publicKey = createEdDsaPublicKey(publicKeyReader.readData(), "Ed448");
 		} else {
-			throw new IllegalArgumentException("Invalid public key algorithm for PuTTY key (only supports RSA / DSA / ECDSA / EdDSA): " + algorithm.name());
+			throw new IllegalArgumentException("Invalid public key algorithm (only supports RSA / DSA / ECDSA / EdDSA): " + algorithm.name());
+		}
+		if (publicKeyReader.isMoreDataAvailable()) {
+			throw new Exception("Invalid public key data: unexpected trailing data found");
+		}
+		return publicKey;
+	}
+
+	private static void checkCurveNameMatchesAlgorithm(final String ecdsaCurveName, final Algorithm algorithm) throws Exception {
+		if (!algorithm.getSshAlgorithmId().equals("ecdsa-sha2-" + ecdsaCurveName)) {
+			throw new Exception("Unsupported or mismatching ECDSA curveName '" + ecdsaCurveName + "' for algorithm " + algorithm.getSshAlgorithmId());
 		}
 	}
 
+	// ---------------------------------------------------------------------------------------------
+	// Key creation helpers
+	// ---------------------------------------------------------------------------------------------
+
+	private static KeyPair createRsaKeyPair(final BigInteger modulus, final BigInteger publicExponent, final BigInteger privateExponent, final BigInteger primeP, final BigInteger primeQ, final BigInteger crtCoefficient) throws Exception {
+		if (modulus.signum() <= 0 || publicExponent.signum() <= 0 || privateExponent.signum() <= 0 || primeP.signum() <= 0 || primeQ.signum() <= 0 || crtCoefficient.signum() <= 0) {
+			throw new Exception("Invalid RSA key data");
+		}
+		final BigInteger primeExponentP = privateExponent.mod(primeP.subtract(BigInteger.ONE)); // d mod (p-1)
+		final BigInteger primeExponentQ = privateExponent.mod(primeQ.subtract(BigInteger.ONE)); // d mod (q-1)
+		final KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+		final PublicKey publicKey = keyFactory.generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
+		final PrivateKey privateKey = keyFactory.generatePrivate(new RSAPrivateCrtKeySpec(modulus, publicExponent, privateExponent, primeP, primeQ, primeExponentP, primeExponentQ, crtCoefficient));
+		return new KeyPair(publicKey, privateKey);
+	}
+
+	private static ECNamedCurveParameterSpec getEcCurveSpec(final String nistCurveName) throws Exception {
+		if (!"nistp256".equals(nistCurveName) && !"nistp384".equals(nistCurveName) && !"nistp521".equals(nistCurveName)) {
+			throw new Exception("Unsupported ECDSA curveName: " + nistCurveName);
+		}
+		return ECNamedCurveTable.getParameterSpec(nistCurveName.replace("nist", "sec") + "r1");
+	}
+
+	/**
+	 * Creates an EC public key from its uncompressed or compressed point encoding. The point is validated to be on the curve.
+	 */
+	static PublicKey createEcPublicKey(final byte[] pointEncoding, final String nistCurveName) throws Exception {
+		final ECNamedCurveParameterSpec ecSpec = getEcCurveSpec(nistCurveName);
+		final org.bouncycastle.math.ec.ECPoint point = ecSpec.getCurve().decodePoint(pointEncoding);
+		return KeyFactory.getInstance("EC", BC_PROVIDER).generatePublic(new org.bouncycastle.jce.spec.ECPublicKeySpec(point, ecSpec));
+	}
+
+	static PrivateKey createEcPrivateKey(final BigInteger s, final String nistCurveName) throws Exception {
+		final ECNamedCurveParameterSpec ecSpec = getEcCurveSpec(nistCurveName);
+		if (s.signum() <= 0 || s.compareTo(ecSpec.getN()) >= 0) {
+			throw new Exception("Invalid EC private key value (not in interval [1, n - 1])");
+		}
+		return KeyFactory.getInstance("EC", BC_PROVIDER).generatePrivate(new org.bouncycastle.jce.spec.ECPrivateKeySpec(s, ecSpec));
+	}
+
+	private static PublicKey deriveEcPublicKey(final BigInteger s, final String nistCurveName) throws Exception {
+		final ECNamedCurveParameterSpec ecSpec = getEcCurveSpec(nistCurveName);
+		final org.bouncycastle.math.ec.ECPoint point = ecSpec.getG().multiply(s).normalize();
+		return KeyFactory.getInstance("EC", BC_PROVIDER).generatePublic(new org.bouncycastle.jce.spec.ECPublicKeySpec(point, ecSpec));
+	}
+
+	/**
+	 * Creates an EdDSA public key from its raw encoding (RFC 8032: little-endian y with the sign bit of x in the most significant bit).
+	 */
+	static PublicKey createEdDsaPublicKey(final byte[] rawPublicKey, final String curveName) throws Exception {
+		final int expectedLength = "Ed25519".equals(curveName) ? 32 : 57;
+		if (rawPublicKey == null || rawPublicKey.length != expectedLength) {
+			throw new Exception("Invalid " + curveName + " public key length: " + (rawPublicKey == null ? 0 : rawPublicKey.length) + " (expected " + expectedLength + ")");
+		}
+		final byte[] data = rawPublicKey.clone();
+		final boolean xOdd = (data[data.length - 1] & 0x80) != 0;
+		data[data.length - 1] &= (byte) 0x7F;
+		reverseArray(data);
+		final EdECPoint edECPoint = new EdECPoint(xOdd, new BigInteger(1, data));
+		return KeyFactory.getInstance(curveName).generatePublic(new EdECPublicKeySpec(new NamedParameterSpec(curveName), edECPoint));
+	}
+
+	static PrivateKey createEdDsaPrivateKey(final byte[] seed, final String curveName) throws Exception {
+		final int expectedLength = "Ed25519".equals(curveName) ? 32 : 57;
+		if (seed == null || seed.length != expectedLength) {
+			throw new Exception("Invalid " + curveName + " private key length: " + (seed == null ? 0 : seed.length) + " (expected " + expectedLength + ")");
+		}
+		return KeyFactory.getInstance(curveName).generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec(curveName), seed));
+	}
+
+	private static byte[] deriveEdDsaPublicKeyBytes(final byte[] seed, final String curveName) {
+		if ("Ed25519".equals(curveName)) {
+			return new Ed25519PrivateKeyParameters(seed, 0).generatePublicKey().getEncoded();
+		} else {
+			return new Ed448PrivateKeyParameters(seed, 0).generatePublicKey().getEncoded();
+		}
+	}
+
+	// ---------------------------------------------------------------------------------------------
+	// PuTTY
+	// ---------------------------------------------------------------------------------------------
+
+	private static Map<String, String> readPuttyKeyProperties(final BufferedReader dataReader) throws Exception {
+		final Map<String, String> keyProperties = new LinkedHashMap<>();
+		String nextLine;
+		while ((nextLine = dataReader.readLine()) != null) {
+			final int indexOfHeaderSeparator = nextLine.indexOf(": ");
+			if (indexOfHeaderSeparator > 0) {
+				final String headerName = nextLine.substring(0, indexOfHeaderSeparator).trim();
+				if ("Public-Lines".equals(headerName) || "Private-Lines".equals(headerName)) {
+					final int numberOfLines;
+					try {
+						numberOfLines = Integer.parseInt(nextLine.substring(indexOfHeaderSeparator + 2).trim());
+					} catch (final NumberFormatException e) {
+						throw new Exception("Corrupt key data found: Invalid value for '" + headerName + "'", e);
+					}
+					if (numberOfLines < 0) {
+						throw new Exception("Corrupt key data found: Invalid value for '" + headerName + "'");
+					}
+					final StringBuilder value = new StringBuilder();
+					for (int i = 0; i < numberOfLines; i++) {
+						if ((nextLine = dataReader.readLine()) != null) {
+							value.append(nextLine.trim());
+						} else {
+							throw new Exception("Corrupt key data found: Missing some lines for '" + headerName + "'");
+						}
+					}
+					keyProperties.put(headerName, value.toString());
+				} else {
+					// Watchout for Comment values correct encoding, because it is part of the MAC checksum
+					keyProperties.put(headerName, nextLine.substring(indexOfHeaderSeparator + 2));
+					if ("Private-MAC".equals(headerName)) {
+						// End of this PuTTY key. Following data may contain further keys.
+						return keyProperties;
+					}
+				}
+			} else if (isNotBlank(nextLine)) {
+				throw new Exception("Corrupt key data found: Unexpected line: '" + nextLine + "'");
+			}
+		}
+		throw new Exception("Corrupt key data found: Missing 'Private-MAC'");
+	}
+
+	private static SshKey readPuttyKey(final int puttyVersion, final Map<String, String> keyProperties, final Password password, final boolean publicKeyOnly) throws Exception {
+		final SshKeyFormat keyFormat = puttyVersion == 2 ? SshKeyFormat.Putty2 : SshKeyFormat.Putty3;
+		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(keyProperties.get("PuTTY-User-Key-File"));
+		final String encryptionMethod = getRequiredProperty(keyProperties, "Encryption");
+		final String rawComment = keyProperties.get("Comment");
+		final String comment = rawComment == null ? null : decodeComment(rawComment.getBytes(StandardCharsets.ISO_8859_1));
+
+		final byte[] publicKeyData = Base64.getDecoder().decode(getRequiredProperty(keyProperties, "Public-Lines"));
+		final PublicKey publicKey = parsePublicKeyBytes(publicKeyData);
+		if (KeyPairUtilities.getAlgorithm(publicKey) != algorithm) {
+			throw new Exception("PuTTY key type mismatch: header says " + algorithm.getSshAlgorithmId() + ", public key data is " + KeyPairUtilities.getAlgorithm(publicKey).getSshAlgorithmId());
+		}
+		if (publicKeyOnly) {
+			return new SshKey(keyFormat, comment, new KeyPair(publicKey, null));
+		}
+
+		final byte[] encryptedPrivateKeyData = Base64.getDecoder().decode(getRequiredProperty(keyProperties, "Private-Lines"));
+		final byte[] foundMacChecksum = getRequiredProperty(keyProperties, "Private-MAC").trim().toLowerCase().getBytes(StandardCharsets.ISO_8859_1);
+		// The comment is part of the MAC exactly in the bytes of the file
+		final byte[] commentBytes = rawComment == null ? new byte[0] : rawComment.getBytes(StandardCharsets.ISO_8859_1);
+
+		if ("none".equals(encryptionMethod)) {
+			final byte[] macKey;
+			if (puttyVersion == 2) {
+				macKey = getPuttyMacKeyVersion2(null);
+			} else {
+				macKey = new byte[0];
+			}
+			final String calculatedMac = calculatePuttyMac(puttyVersion, macKey, algorithm, encryptionMethod, commentBytes, publicKeyData, encryptedPrivateKeyData);
+			if (!MessageDigest.isEqual(foundMacChecksum, calculatedMac.getBytes(StandardCharsets.ISO_8859_1))) {
+				throw new Exception("Invalid PuTTY key data: MAC checksum mismatch");
+			}
+			return new SshKey(keyFormat, comment, readPuttyPrivateKeyData(encryptedPrivateKeyData, publicKey, algorithm));
+		} else if ("aes256-cbc".equals(encryptionMethod)) {
+			if (password.getPasswordChars() == null || password.getPasswordChars().length == 0) {
+				throw new WrongPasswordException("Key is encrypted, but no password was given");
+			} else if (encryptedPrivateKeyData.length == 0 || encryptedPrivateKeyData.length % 16 != 0) {
+				throw new Exception("Invalid PuTTY key data: Invalid encrypted data length");
+			}
+
+			// PuTTY on Windows uses the system codepage (mostly compatible to ISO-8859-1), newer versions on Linux use UTF-8
+			for (final byte[] passwordBytes : getPasswordByteVariants(password, false)) {
+				byte[] puttyKeyEncryptionKey = null;
+				byte[] privateKeyData = null;
+				try {
+					final byte[] macKey;
+					final AlgorithmParameterSpec iv;
+					if (puttyVersion == 2) {
+						puttyKeyEncryptionKey = getPuttyPrivateKeyEncryptionKeyVersion2(passwordBytes);
+						macKey = getPuttyMacKeyVersion2(passwordBytes);
+						iv = new IvParameterSpec(new byte[16]);
+					} else {
+						puttyKeyEncryptionKey = getPuttyPrivateKeyEncryptionKeyVersion3Argon2(passwordBytes, keyProperties);
+						macKey = Arrays.copyOfRange(puttyKeyEncryptionKey, 48, 80);
+						iv = new IvParameterSpec(puttyKeyEncryptionKey, 32, 16);
+					}
+					final Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
+					cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(puttyKeyEncryptionKey, 0, 32, "AES"), iv);
+					privateKeyData = cipher.doFinal(encryptedPrivateKeyData);
+
+					final String calculatedMac = calculatePuttyMac(puttyVersion, macKey, algorithm, encryptionMethod, commentBytes, publicKeyData, privateKeyData);
+					Arrays.fill(macKey, (byte) 0);
+					if (MessageDigest.isEqual(foundMacChecksum, calculatedMac.getBytes(StandardCharsets.ISO_8859_1))) {
+						return new SshKey(keyFormat, comment, readPuttyPrivateKeyData(privateKeyData, publicKey, algorithm));
+					}
+				} finally {
+					clear(puttyKeyEncryptionKey);
+					clear(privateKeyData);
+				}
+			}
+			throw new WrongPasswordException();
+		} else {
+			throw new Exception("Unsupported key encryption method: " + encryptionMethod);
+		}
+	}
+
+	private static String getRequiredProperty(final Map<String, String> keyProperties, final String propertyName) throws Exception {
+		final String value = keyProperties.get(propertyName);
+		if (value == null) {
+			throw new Exception("Corrupt key data found: Missing '" + propertyName + "'");
+		}
+		return value;
+	}
+
+	static byte[] getPuttyPrivateKeyEncryptionKeyVersion2(final byte[] passwordByteArray) throws Exception {
+		final byte[] puttyKeyEncryptionKey = new byte[32];
+		final MessageDigest digest = MessageDigest.getInstance("SHA-1");
+
+		digest.update(new byte[] { 0, 0, 0, 0 });
+		digest.update(passwordByteArray);
+		final byte[] key1 = digest.digest();
+
+		digest.update(new byte[] { 0, 0, 0, 1 });
+		digest.update(passwordByteArray);
+		final byte[] key2 = digest.digest();
+
+		System.arraycopy(key1, 0, puttyKeyEncryptionKey, 0, 20);
+		System.arraycopy(key2, 0, puttyKeyEncryptionKey, 20, 12);
+		Arrays.fill(key1, (byte) 0);
+		Arrays.fill(key2, (byte) 0);
+		return puttyKeyEncryptionKey;
+	}
+
+	static byte[] getPuttyMacKeyVersion2(final byte[] passwordBytes) throws Exception {
+		final MessageDigest digest = MessageDigest.getInstance("SHA-1");
+		digest.update("putty-private-key-file-mac-key".getBytes(StandardCharsets.US_ASCII));
+		if (passwordBytes != null) {
+			digest.update(passwordBytes);
+		}
+		return digest.digest();
+	}
+
+	private static byte[] getPuttyPrivateKeyEncryptionKeyVersion3Argon2(final byte[] passwordBytes, final Map<String, String> keyProperties) throws Exception {
+		final String argon2Type = getRequiredProperty(keyProperties, "Key-Derivation");
+		final int argon2Memory = parsePuttyIntProperty(keyProperties, "Argon2-Memory");
+		final int argon2Passes = parsePuttyIntProperty(keyProperties, "Argon2-Passes");
+		final int argon2Parallelism = parsePuttyIntProperty(keyProperties, "Argon2-Parallelism");
+		final byte[] argon2Salt = fromHexString(getRequiredProperty(keyProperties, "Argon2-Salt"));
+
+		if (argon2Memory < 8 || argon2Memory > MAX_ARGON2_MEMORY_KB) {
+			throw new Exception("Invalid Argon2-Memory value " + argon2Memory + " (allowed: 8 - " + MAX_ARGON2_MEMORY_KB + " KiB). Maybe the key data is corrupted or malicious");
+		} else if (argon2Passes < 1 || argon2Passes > MAX_ARGON2_PASSES) {
+			throw new Exception("Invalid Argon2-Passes value " + argon2Passes + " (allowed: 1 - " + MAX_ARGON2_PASSES + "). Maybe the key data is corrupted or malicious");
+		} else if ((long) argon2Memory * argon2Passes > MAX_ARGON2_MEMORY_TIMES_PASSES_KB) {
+			throw new Exception("Invalid Argon2 parameters: Argon2-Memory * Argon2-Passes exceeds " + MAX_ARGON2_MEMORY_TIMES_PASSES_KB + ". Maybe the key data is corrupted or malicious");
+		} else if (argon2Parallelism < 1 || argon2Parallelism > MAX_ARGON2_PARALLELISM || argon2Memory < 8 * argon2Parallelism) {
+			throw new Exception("Invalid Argon2-Parallelism value " + argon2Parallelism + ". Maybe the key data is corrupted or malicious");
+		} else if (argon2Salt.length == 0) {
+			throw new Exception("Invalid empty Argon2-Salt");
+		}
+		return deriveArgon2Key(passwordBytes, argon2Type, argon2Memory, argon2Passes, argon2Parallelism, argon2Salt);
+	}
+
+	static byte[] deriveArgon2Key(final byte[] passwordBytes, final String argon2Type, final int argon2Memory, final int argon2Passes, final int argon2Parallelism, final byte[] argon2Salt) throws Exception {
+		final int argon2TypeInt;
+		if ("Argon2i".equalsIgnoreCase(argon2Type)) {
+			argon2TypeInt = Argon2Parameters.ARGON2_i;
+		} else if ("Argon2d".equalsIgnoreCase(argon2Type)) {
+			argon2TypeInt = Argon2Parameters.ARGON2_d;
+		} else if ("Argon2id".equalsIgnoreCase(argon2Type)) {
+			argon2TypeInt = Argon2Parameters.ARGON2_id;
+		} else {
+			throw new Exception("Unsupported Key-Derivation (Only \"Argon2i\", \"Argon2d\", \"Argon2id\" are supported): " + argon2Type);
+		}
+		final Argon2Parameters.Builder builder = new Argon2Parameters.Builder(argon2TypeInt)
+				.withVersion(Argon2Parameters.ARGON2_VERSION_13)
+				.withIterations(argon2Passes)
+				.withMemoryAsKB(argon2Memory)
+				.withParallelism(argon2Parallelism)
+				.withSalt(argon2Salt);
+		final Argon2BytesGenerator argon2BytesGenerator = new Argon2BytesGenerator();
+		argon2BytesGenerator.init(builder.build());
+		final byte[] puttyKeyEncryptionKey = new byte[80];
+		argon2BytesGenerator.generateBytes(passwordBytes, puttyKeyEncryptionKey);
+		return puttyKeyEncryptionKey;
+	}
+
+	private static int parsePuttyIntProperty(final Map<String, String> keyProperties, final String propertyName) throws Exception {
+		try {
+			return Integer.parseInt(getRequiredProperty(keyProperties, propertyName).trim());
+		} catch (final NumberFormatException e) {
+			throw new Exception("Corrupt key data found: Invalid value for '" + propertyName + "'", e);
+		}
+	}
+
+	/**
+	 * Calculates the PuTTY MAC (v2: HMAC-SHA-1, v3: HMAC-SHA-256) as lowercase hex string.
+	 */
+	static String calculatePuttyMac(final int puttyVersion, final byte[] macKey, final Algorithm algorithm, final String encryptionType, final byte[] commentBytes, final byte[] publicKey, final byte[] privateKey) throws Exception {
+		final Mac mac = Mac.getInstance(puttyVersion == 2 ? "HmacSHA1" : "HmacSHA256");
+		// PuTTY v3 uses an empty MAC key for unencrypted keys, which SecretKeySpec does not allow, but HMAC defines it to be equal to a zero byte key
+		mac.init(new SecretKeySpec(macKey.length == 0 ? new byte[1] : macKey, mac.getAlgorithm()));
+
+		final ByteArrayOutputStream out = new ByteArrayOutputStream();
+		final DataOutputStream data = new DataOutputStream(out);
+
+		final byte[] keyTypeBytes = algorithm.getSshAlgorithmId().getBytes(StandardCharsets.ISO_8859_1);
+		data.writeInt(keyTypeBytes.length);
+		data.write(keyTypeBytes);
+
+		final byte[] encryptionTypeBytes = encryptionType.getBytes(StandardCharsets.ISO_8859_1);
+		data.writeInt(encryptionTypeBytes.length);
+		data.write(encryptionTypeBytes);
+
+		data.writeInt(commentBytes.length);
+		data.write(commentBytes);
+
+		data.writeInt(publicKey.length);
+		data.write(publicKey);
+
+		data.writeInt(privateKey.length);
+		data.write(privateKey);
+
+		return toHexString(mac.doFinal(out.toByteArray())).toLowerCase();
+	}
+
+	private static KeyPair readPuttyPrivateKeyData(final byte[] privateKeyData, final PublicKey publicKey, final Algorithm algorithm) throws Exception {
+		try {
+			final BlockDataReader privateKeyReader = new BlockDataReader(privateKeyData);
+			if (Algorithm.RSA == algorithm) {
+				final java.security.interfaces.RSAPublicKey rsaPublicKey = (java.security.interfaces.RSAPublicKey) publicKey;
+				final BigInteger privateExponent = privateKeyReader.readBigInt();
+				final BigInteger p = privateKeyReader.readBigInt(); // secret prime factor (= PrimeP)
+				final BigInteger q = privateKeyReader.readBigInt(); // secret prime factor (= PrimeQ)
+				final BigInteger iqmp = privateKeyReader.readBigInt(); // q^-1 mod p (= CrtCoefficient)
+				return createRsaKeyPair(rsaPublicKey.getModulus(), rsaPublicKey.getPublicExponent(), privateExponent, p, q, iqmp);
+			} else if (Algorithm.DSA == algorithm) {
+				final java.security.interfaces.DSAPublicKey dsaPublicKey = (java.security.interfaces.DSAPublicKey) publicKey;
+				final BigInteger x = privateKeyReader.readBigInt();
+				return createDsaKeyPair(dsaPublicKey.getParams().getP(), dsaPublicKey.getParams().getQ(), dsaPublicKey.getParams().getG(), dsaPublicKey.getY(), x);
+			} else if (Algorithm.NISTP256 == algorithm || Algorithm.NISTP384 == algorithm || Algorithm.NISTP521 == algorithm) {
+				final String ecdsaCurveName = algorithm.getSshAlgorithmId().substring("ecdsa-sha2-".length());
+				return new KeyPair(publicKey, createEcPrivateKey(privateKeyReader.readBigInt(), ecdsaCurveName));
+			} else if (Algorithm.ED25519 == algorithm) {
+				return new KeyPair(publicKey, createEdDsaPrivateKey(privateKeyReader.readData(), "Ed25519"));
+			} else if (Algorithm.ED448 == algorithm) {
+				return new KeyPair(publicKey, createEdDsaPrivateKey(privateKeyReader.readData(), "Ed448"));
+			} else {
+				throw new IllegalArgumentException("Invalid public key algorithm for PuTTY key (only supports RSA / DSA / ECDSA / EdDSA): " + algorithm.name());
+			}
+		} catch (final Exception e) {
+			throw new Exception("Cannot read key data", e);
+		}
+	}
+
+	// ---------------------------------------------------------------------------------------------
+	// Common helpers
+	// ---------------------------------------------------------------------------------------------
+
+	/**
+	 * Password byte variants to try: Putty uses "ISO-8859-1" (or the Windows codepage) for password encoding, "ssh-keygen" and OpenSSL on Linux use UTF-8.
+	 */
+	private static List<byte[]> getPasswordByteVariants(final Password password, final boolean utf8First) {
+		final List<byte[]> variants = new ArrayList<>();
+		final byte[] utf8Bytes = password.getPasswordBytesUtfEncoded();
+		final byte[] isoBytes = password.getPasswordBytesIsoEncoded();
+		variants.add(utf8First ? utf8Bytes : isoBytes);
+		if (!Arrays.equals(utf8Bytes, isoBytes)) {
+			variants.add(utf8First ? isoBytes : utf8Bytes);
+		}
+		return variants;
+	}
+
+	/**
+	 * Decodes key comment bytes.
+	 * Comments are expected in UTF-8 (OpenSSH), but older tools write ISO-8859-1. Invalid UTF-8 data is therefore decoded as ISO-8859-1.
+	 */
+	static String decodeComment(final byte[] commentBytes) {
+		if (commentBytes == null || commentBytes.length == 0) {
+			return null;
+		}
+		final String comment = decodeStrict(commentBytes, StandardCharsets.UTF_8);
+		if (comment == null) {
+			return new String(commentBytes, StandardCharsets.ISO_8859_1);
+		}
+		// Fix comments, which were encoded twice in UTF-8 (e.g. "Ã¤" instead of "ä")
+		boolean onlyLatin1 = true;
+		boolean containsUtf8LeadingByteCharacter = false;
+		for (final char nextChar : comment.toCharArray()) {
+			if (nextChar > 0xFF) {
+				onlyLatin1 = false;
+				break;
+			} else if (nextChar == 0xC3 || nextChar == 0xC2) {
+				containsUtf8LeadingByteCharacter = true;
+			}
+		}
+		if (onlyLatin1 && containsUtf8LeadingByteCharacter) {
+			final String fixedComment = decodeStrict(comment.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+			if (fixedComment != null) {
+				return fixedComment;
+			}
+		}
+		return comment;
+	}
+
+	private static String decodeStrict(final byte[] data, final Charset charset) {
+		try {
+			return charset.newDecoder()
+					.onMalformedInput(CodingErrorAction.REPORT)
+					.onUnmappableCharacter(CodingErrorAction.REPORT)
+					.decode(ByteBuffer.wrap(data)).toString();
+		} catch (@SuppressWarnings("unused") final CharacterCodingException e) {
+			return null;
+		}
+	}
+
+	static byte[] fromHexString(final String value) throws Exception {
+		if (value == null || value.length() % 2 != 0) {
+			throw new Exception("Invalid hex string");
+		}
+		final byte[] data = new byte[value.length() / 2];
+		for (int i = 0; i < value.length(); i += 2) {
+			final int high = Character.digit(value.charAt(i), 16);
+			final int low = Character.digit(value.charAt(i + 1), 16);
+			if (high < 0 || low < 0) {
+				throw new Exception("Invalid hex string");
+			}
+			data[i / 2] = (byte) ((high << 4) + low);
+		}
+		return data;
+	}
+
+	static String toHexString(final byte[] data) {
+		final StringBuilder returnString = new StringBuilder();
+		for (final byte dataByte : data) {
+			returnString.append(String.format("%02X", dataByte));
+		}
+		return returnString.toString();
+	}
+
+	private static byte[] reverseArray(final byte[] arrayData) {
+		for (int i = 0; i < arrayData.length / 2; i++) {
+			final int j = arrayData.length - 1 - i;
+			final byte tmp = arrayData[i];
+			arrayData[i] = arrayData[j];
+			arrayData[j] = tmp;
+		}
+		return arrayData;
+	}
+
+	private static void clear(final byte[] array) {
+		if (array != null) {
+			Arrays.fill(array, (byte) 0);
+		}
+	}
+
+	private static boolean isNotBlank(final String value) {
+		return value != null && value.trim().length() > 0;
+	}
+
+	/**
+	 * Reader for SSH wire format data (RFC 4251: uint32, string, mpint).
+	 */
 	private static class BlockDataReader {
 		/**
 		 * Sanity upper bound for a single length-prefixed data block, to protect against maliciously
@@ -531,7 +1562,7 @@ public class SshKeyReader {
 		private static final int MAX_BLOCK_SIZE = 16 * 1024 * 1024; // 16 MB
 
 		private final ByteArrayInputStream inputStream;
-		private final DataInput keyDataInput;
+		private final DataInputStream keyDataInput;
 
 		private BlockDataReader(final byte[] data) {
 			inputStream = new ByteArrayInputStream(data);
@@ -551,18 +1582,22 @@ public class SshKeyReader {
 		}
 
 		private BigInteger readBigInt() throws Exception {
-			return new BigInteger(readData());
+			final byte[] data = readData();
+			// An empty mpint represents zero
+			return data.length == 0 ? BigInteger.ZERO : new BigInteger(data);
 		}
 
-		private byte[] readData() throws IOException, Exception {
+		private String readString() throws Exception {
+			return new String(readData(), StandardCharsets.UTF_8);
+		}
+
+		private byte[] readData() throws Exception {
 			try {
 				final int nextBlockSize = keyDataInput.readInt();
 				if (nextBlockSize < 0) {
 					throw new Exception("Key blocksize error. Maybe the key encryption password was wrong");
-				} else if (nextBlockSize > MAX_BLOCK_SIZE) {
-					throw new Exception("Key blocksize " + nextBlockSize + " exceeds maximum allowed size of " + MAX_BLOCK_SIZE + " bytes. Maybe the key encryption password was wrong or the key data is corrupted");
-				} else if (nextBlockSize == 0) {
-					return new byte[0];
+				} else if (nextBlockSize > MAX_BLOCK_SIZE || nextBlockSize > inputStream.available()) {
+					throw new Exception("Key blocksize " + nextBlockSize + " exceeds available data. Maybe the key encryption password was wrong or the key data is corrupted");
 				} else {
 					final byte[] nextBlock = new byte[nextBlockSize];
 					keyDataInput.readFully(nextBlock);
@@ -573,11 +1608,14 @@ public class SshKeyReader {
 			}
 		}
 
-		private byte[] readZeroLimitedData() throws Exception {
+		private byte[] readZeroLimitedData(final int maxLength) throws Exception {
 			try {
 				final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
 				int nextByte;
-				while ((nextByte = keyDataInput.readByte()) > 0) {
+				while ((nextByte = keyDataInput.readUnsignedByte()) != 0) {
+					if (buffer.size() >= maxLength) {
+						throw new Exception("Key block read error: Missing zero terminator");
+					}
 					buffer.write(nextByte);
 				}
 				return buffer.toByteArray();
@@ -586,7 +1624,7 @@ public class SshKeyReader {
 			}
 		}
 
-		private byte[] readLeftoverData() throws IOException, Exception {
+		private byte[] readLeftoverData() throws Exception {
 			try {
 				final byte[] nextBlock = new byte[inputStream.available()];
 				keyDataInput.readFully(nextBlock);
@@ -595,1035 +1633,5 @@ public class SshKeyReader {
 				throw new Exception("Key block read error", e);
 			}
 		}
-	}
-
-	private static KeyPair readPKCS8RsaPrivateKey(final byte[] data) throws Exception {
-		final DerTag enclosingDerTag = Asn1Codec.readDerTag(data);
-		if (Asn1Codec.DER_TAG_SEQUENCE != enclosingDerTag.getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final List<DerTag> derDataTags = Asn1Codec.readDerTags(enclosingDerTag.getData());
-
-		final BigInteger keyEncodingVersion = new BigInteger(derDataTags.get(0).getData());
-		if (!BigInteger.ZERO.equals(keyEncodingVersion)) {
-			throw new Exception("Invalid key data version found");
-		}
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(1).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger modulus = new BigInteger(derDataTags.get(1).getData());
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(2).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger publicExponent = new BigInteger(derDataTags.get(2).getData());
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(3).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger privateExponent = new BigInteger(derDataTags.get(3).getData());
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(4).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger primeP = new BigInteger(derDataTags.get(4).getData());
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(5).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger primeQ = new BigInteger(derDataTags.get(5).getData());
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(6).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger primeExponentP = new BigInteger(derDataTags.get(6).getData());
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(7).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger primeExponentQ = new BigInteger(derDataTags.get(7).getData());
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(8).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger crtCoefficient = new BigInteger(derDataTags.get(8).getData());
-
-		final KeyFactory keyFactory = KeyFactory.getInstance("RSA");
-		final PublicKey publicKey = keyFactory.generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
-		final PrivateKey privateKey = keyFactory.generatePrivate(new RSAPrivateCrtKeySpec(modulus, publicExponent, privateExponent, primeP, primeQ, primeExponentP, primeExponentQ, crtCoefficient));
-		return new KeyPair(publicKey, privateKey);
-	}
-
-	private static KeyPair readPKCS8DsaPrivateKey(final byte[] data) throws Exception {
-		final DerTag enclosingDerTag = Asn1Codec.readDerTag(data);
-		if (Asn1Codec.DER_TAG_SEQUENCE != enclosingDerTag.getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final List<DerTag> derDataTags = Asn1Codec.readDerTags(enclosingDerTag.getData());
-
-		final BigInteger keyEncodingVersion = new BigInteger(derDataTags.get(0).getData());
-		if (!BigInteger.ZERO.equals(keyEncodingVersion)) {
-			throw new Exception("Invalid key data version found");
-		}
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(1).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger p = new BigInteger(derDataTags.get(1).getData());
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(2).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger q = new BigInteger(derDataTags.get(2).getData());
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(3).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger g = new BigInteger(derDataTags.get(3).getData());
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(4).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger y = new BigInteger(derDataTags.get(4).getData());
-
-		if (Asn1Codec.DER_TAG_INTEGER != derDataTags.get(5).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final BigInteger x = new BigInteger(derDataTags.get(5).getData());
-
-		final KeyFactory keyFactory = KeyFactory.getInstance("DSA");
-		final PublicKey publicKey = keyFactory.generatePublic(new DSAPublicKeySpec(y, p, q, g));
-		final PrivateKey privateKey = keyFactory.generatePrivate(new DSAPrivateKeySpec(x, p, q, g));
-		return new KeyPair(publicKey, privateKey);
-	}
-
-	private static KeyPair readPKCS8EcdsaPrivateKey(final byte[] data) throws Exception {
-		final DerTag enclosingDerTag = Asn1Codec.readDerTag(data);
-		if (Asn1Codec.DER_TAG_SEQUENCE != enclosingDerTag.getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final List<DerTag> derDataTags = Asn1Codec.readDerTags(enclosingDerTag.getData());
-
-		final BigInteger keyEncodingVersion = new BigInteger(derDataTags.get(0).getData());
-		if (!BigInteger.ONE.equals(keyEncodingVersion)) {
-			throw new Exception("Invalid key data version found");
-		}
-
-		if (Asn1Codec.DER_TAG_OCTET_STRING != derDataTags.get(1).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final byte[] sBytes = derDataTags.get(1).getData();
-
-		if (Asn1Codec.DER_TAG_CONTEXT_SPECIFIC_0 != derDataTags.get(2).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final byte[] oidTagBytes = derDataTags.get(2).getData();
-		final DerTag oidTag = Asn1Codec.readDerTag(oidTagBytes);
-		if (Asn1Codec.DER_TAG_OBJECT != oidTag.getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final byte[] oidBytes = oidTag.getData();
-		String ecdsaCurveName;
-		if (Arrays.equals(OID.ECDSA_CURVE_NISTP256_ARRAY, oidBytes)) {
-			ecdsaCurveName = "nistp256";
-		} else if (Arrays.equals(OID.ECDSA_CURVE_NISTP384_ARRAY, oidBytes)) {
-			ecdsaCurveName = "nistp384";
-		} else if (Arrays.equals(OID.ECDSA_CURVE_NISTP521_ARRAY, oidBytes)) {
-			ecdsaCurveName = "nistp521";
-		} else {
-			try {
-				throw new Exception("Unsupported ec curve oid found: " + new OID(oidBytes).getStringEncoding());
-			} catch (final Exception e) {
-				throw new Exception("Invalid ec curve oid found", e);
-			}
-		}
-
-		if (Asn1Codec.DER_TAG_CONTEXT_SPECIFIC_1 != derDataTags.get(3).getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		final byte[] publicKeyTagBytes = derDataTags.get(3).getData();
-		final DerTag publicKeyTag = Asn1Codec.readDerTag(publicKeyTagBytes);
-		if (Asn1Codec.DER_TAG_BIT_STRING != publicKeyTag.getTagId()) {
-			throw new Exception("Invalid key data found");
-		}
-		byte[] eccKeyBlobBytes = publicKeyTag.getData();
-		if (0 != eccKeyBlobBytes[0] || 4 != eccKeyBlobBytes[1]) {
-			throw new Exception("Invalid key data found");
-		}
-		// Remove prefix "0"
-		eccKeyBlobBytes = Arrays.copyOfRange(eccKeyBlobBytes, 1, eccKeyBlobBytes.length);
-
-		Security.addProvider(new BouncyCastleProvider());
-		final KeyFactory keyFactory = KeyFactory.getInstance("EC", BouncyCastleProvider.PROVIDER_NAME);
-		final AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
-		parameters.init(new ECGenParameterSpec(ecdsaCurveName.replace("nist", "sec") + "r1"));
-		final ECParameterSpec ecParameterSpec = parameters.getParameterSpec(ECParameterSpec.class);
-		final PrivateKey privateKey = keyFactory.generatePrivate(new ECPrivateKeySpec(new BigInteger(sBytes), ecParameterSpec));
-
-		final org.bouncycastle.jce.spec.ECNamedCurveParameterSpec ecSpec = ECNamedCurveTable.getParameterSpec(ecdsaCurveName.replace("nist", "sec") + "r1");
-		final org.bouncycastle.math.ec.ECPoint point = ecSpec.getCurve().decodePoint(eccKeyBlobBytes);
-		final org.bouncycastle.jce.spec.ECPublicKeySpec pubSpec = new org.bouncycastle.jce.spec.ECPublicKeySpec(point, ecSpec);
-		final PublicKey publicKey = keyFactory.generatePublic(pubSpec);
-
-		return new KeyPair(publicKey, privateKey);
-	}
-
-	private static SshKey readOpenSshv1Key(final byte[] data, final Password password, final boolean skipPrivateKey) throws Exception {
-		final BlockDataReader dataReader = new BlockDataReader(data);
-		// Storage format name
-		final String keyFormatString = new String(dataReader.readZeroLimitedData(), StandardCharsets.UTF_8);
-		if (!"openssh-key-v1".equals(keyFormatString)) {
-			throw new Exception("Invalid keyFormat name '" + keyFormatString + "' found. Expected 'openssh-key-v1'");
-		}
-
-		// EncryptionCipherName
-		String encryptionCipherName = new String(dataReader.readData(), StandardCharsets.UTF_8);
-		if ("none".equals(encryptionCipherName)) {
-			encryptionCipherName = null;
-		}
-
-		// kdf: key derivation function
-		String kdfName = new String(dataReader.readData(), StandardCharsets.UTF_8);
-		if ("none".equals(kdfName)) {
-			kdfName = null;
-		}
-
-		// kdf info
-		byte[] kdfInitialVectorBytes = null;
-		int kdfRounds = 0;
-		final byte[] kdfInfoBytes = dataReader.readData();
-		if (kdfInfoBytes.length > 0) {
-			final BlockDataReader kdfInfoReader = new BlockDataReader(kdfInfoBytes);
-			kdfInitialVectorBytes = kdfInfoReader.readData();
-			kdfRounds = kdfInfoReader.readSimpleInt();
-		}
-
-		// Amount of stored keys
-		final int amountOfKeys = dataReader.readSimpleInt();
-		if (amountOfKeys != 1) {
-			throw new Exception("Invalid amountOfKeys " + amountOfKeys + " found. Expected 1");
-		}
-
-		// Public key
-		final byte[] publicKeyDataBytes = dataReader.readData();
-		final PublicKey publicKey = readOpenSshv1PublicKey(publicKeyDataBytes);
-
-		if (skipPrivateKey) {
-			return new SshKey(SshKeyFormat.OpenSSHv1, null, new KeyPair(publicKey, null));
-		}
-
-		// Private key
-		byte[] privateKeyDataBytes = dataReader.readData();
-
-		// Decrypt private key data
-		if ("aes256-ctr".equalsIgnoreCase(encryptionCipherName)) {
-			if ("bcrypt".equalsIgnoreCase(kdfName)) {
-				if (kdfInitialVectorBytes == null || kdfInitialVectorBytes.length == 0) {
-					throw new Exception("Invalid key derivation function info 'kdfInitialVectorBytes' for key derivation function '" + kdfName + "'");
-				} else if (kdfRounds <= 0) {
-					throw new Exception("Invalid key derivation function info 'kdfRounds = " + kdfRounds + "' for key derivation function '" + kdfName + "'");
-				} else if (kdfRounds > MAX_BCRYPT_KDF_ROUNDS) {
-					throw new Exception("Key derivation function info 'kdfRounds = " + kdfRounds + "' exceeds maximum allowed value of " + MAX_BCRYPT_KDF_ROUNDS + " for key derivation function '" + kdfName + "'. Maybe the key data is corrupted or malicious");
-				} else {
-					if (password == null || password.getPasswordChars() == null) {
-						throw new WrongPasswordException();
-					} else {
-						// Decrypt private key by bcrypt pbkdf
-						// Putty uses "ISO-8859-1" for password encoding, even for those keys stored in OpenSSHv1 and OpenSSL format
-						// "ssh-keygen" on Linux uses UTF-8 for password encoding
-						for (final Charset charset : new Charset[] { StandardCharsets.UTF_8, StandardCharsets.ISO_8859_1 }) {
-							final byte[] passwordBytes = StandardCharsets.UTF_8.equals(charset) ? password.getPasswordBytesUtfEncoded() : password.getPasswordBytesIsoEncoded();
-							final byte[] derivedKeyBytes = new byte[48];
-							new BCryptPBKDF().derivePassword(passwordBytes, kdfInitialVectorBytes, kdfRounds, derivedKeyBytes);
-							final SecretKey secretKey = new SecretKeySpec(derivedKeyBytes, 0, 32, "AES");
-							final AlgorithmParameterSpec iv = new IvParameterSpec(derivedKeyBytes, 32, 16);
-
-							final Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
-							cipher.init(Cipher.DECRYPT_MODE, secretKey, iv);
-
-							final byte[] privateKeyDataBytesDecrypted = cipher.doFinal(privateKeyDataBytes);
-
-							if (privateKeyDataBytesDecrypted[0] == privateKeyDataBytesDecrypted[4]
-									&& privateKeyDataBytesDecrypted[1] == privateKeyDataBytesDecrypted[5]
-											&& privateKeyDataBytesDecrypted[2] == privateKeyDataBytesDecrypted[6]
-													&& privateKeyDataBytesDecrypted[3] == privateKeyDataBytesDecrypted[7]) {
-								privateKeyDataBytes = privateKeyDataBytesDecrypted;
-								break;
-							}
-						}
-						if (privateKeyDataBytes[0] != privateKeyDataBytes[4]
-								|| privateKeyDataBytes[1] != privateKeyDataBytes[5]
-										|| privateKeyDataBytes[2] != privateKeyDataBytes[6]
-												|| privateKeyDataBytes[3] != privateKeyDataBytes[7]) {
-							throw new WrongPasswordException();
-						}
-					}
-				}
-			} else if (kdfName != null) {
-				throw new Exception("Invalid key derivation function method (Only 'bcrypt' allowed) '" + kdfName + "'");
-			}
-		} else if (encryptionCipherName != null) {
-			throw new Exception("Invalid key encryption function method (Only 'aes-ctr' allowed) '" + encryptionCipherName + "'");
-		}
-
-		final SshKey sshKey;
-		try {
-			sshKey = readOpenSshv1PrivateKey(privateKeyDataBytes);
-		} catch (final Exception e) {
-			if (password != null) {
-				throw new WrongPasswordException();
-			} else {
-				throw e;
-			}
-		}
-
-		if (dataReader.isMoreDataAvailable()) {
-			throw new Exception("Invalid key data: unexpected trailing data found");
-		}
-
-		return sshKey;
-	}
-
-	private static PublicKey readOpenSshv1PublicKey(final byte[] publicKeyData) throws Exception {
-		final BlockDataReader publicKeyDataReader = new BlockDataReader(publicKeyData);
-		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(new String(publicKeyDataReader.readData(), StandardCharsets.UTF_8));
-
-		if (Algorithm.RSA == algorithm) {
-			final BigInteger publicExponent = publicKeyDataReader.readBigInt();
-			final BigInteger modulus = publicKeyDataReader.readBigInt();
-
-			if (publicKeyDataReader.isMoreDataAvailable()) {
-				throw new Exception("Invalid public key data: unexpected trailing data found");
-			}
-
-			final KeyFactory keyFactory = KeyFactory.getInstance("RSA");
-			final PublicKey publicKey = keyFactory.generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
-			return publicKey;
-		} else if (Algorithm.DSA == algorithm) {
-			final BigInteger p = publicKeyDataReader.readBigInt();
-			final BigInteger q = publicKeyDataReader.readBigInt();
-			final BigInteger g = publicKeyDataReader.readBigInt();
-			final BigInteger y = publicKeyDataReader.readBigInt();
-
-			if (publicKeyDataReader.isMoreDataAvailable()) {
-				throw new Exception("Invalid public key data: unexpected trailing data found");
-			}
-
-			final KeyFactory keyFactory = KeyFactory.getInstance("DSA");
-			final PublicKey publicKey = keyFactory.generatePublic(new DSAPublicKeySpec(y, p, q, g));
-			return publicKey;
-		} else if (Algorithm.NISTP256 == algorithm
-				|| Algorithm.NISTP384 == algorithm
-				|| Algorithm.NISTP521 == algorithm) {
-			final String ecdsaCurveName = new String(publicKeyDataReader.readData(), StandardCharsets.UTF_8);
-
-			final byte[] eccKeyBlobBytes = publicKeyDataReader.readData();
-
-			if (publicKeyDataReader.isMoreDataAvailable()) {
-				throw new Exception("Invalid public key data: unexpected trailing data found");
-			}
-
-			Security.addProvider(new BouncyCastleProvider());
-			final KeyFactory keyFactory = KeyFactory.getInstance("EC", BouncyCastleProvider.PROVIDER_NAME);
-			final org.bouncycastle.jce.spec.ECNamedCurveParameterSpec ecSpec = ECNamedCurveTable.getParameterSpec(ecdsaCurveName.replace("nist", "sec") + "r1");
-			final org.bouncycastle.math.ec.ECPoint point = ecSpec.getCurve().decodePoint(eccKeyBlobBytes);
-			final org.bouncycastle.jce.spec.ECPublicKeySpec pubSpec = new org.bouncycastle.jce.spec.ECPublicKeySpec(point, ecSpec);
-			final PublicKey publicKey = keyFactory.generatePublic(pubSpec);
-
-			return publicKey;
-		} else if (Algorithm.ED25519 == algorithm) {
-			final byte[] edDsaPublicKeyData = publicKeyDataReader.readData();
-
-			if (publicKeyDataReader.isMoreDataAvailable()) {
-				throw new Exception("Invalid public key data: unexpected trailing data found");
-			}
-
-			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
-			final boolean xOdd = (mostSignificantByte & 0x80) != 0;
-			edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-			reverseArray(edDsaPublicKeyData);
-
-			final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
-			final EdECPoint edECPoint = new EdECPoint(xOdd, y);
-
-			final PublicKey publicKey = KeyFactory.getInstance("Ed25519").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed25519"), edECPoint));
-			return publicKey;
-		} else if (Algorithm.ED448 == algorithm) {
-			final byte[] edDsaPublicKeyData = publicKeyDataReader.readData();
-
-			if (publicKeyDataReader.isMoreDataAvailable()) {
-				throw new Exception("Invalid public key data: unexpected trailing data found");
-			}
-
-			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
-			final boolean xOdd = (mostSignificantByte & 0x80) != 0;
-			edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-			reverseArray(edDsaPublicKeyData);
-
-			final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
-			final EdECPoint edECPoint = new EdECPoint(xOdd, y);
-
-			final PublicKey publicKey = KeyFactory.getInstance("Ed448").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed448"), edECPoint));
-			return publicKey;
-		} else {
-			throw new Exception("Unexpected key type '" + algorithm.name() + "'");
-		}
-	}
-
-	private static SshKey readOpenSshv1PrivateKey(final byte[] privateKeyData) throws Exception {
-		final BlockDataReader privateKeyDataReader = new BlockDataReader(privateKeyData);
-		// Quick decryption validity check. Both checkInts must match.
-		final int checkInt1 = privateKeyDataReader.readSimpleInt();
-		final int checkInt2 = privateKeyDataReader.readSimpleInt();
-		if (checkInt1 != checkInt2) {
-			throw new WrongPasswordException();
-		}
-
-		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(new String(privateKeyDataReader.readData(), StandardCharsets.UTF_8));
-
-		if (Algorithm.RSA == algorithm) {
-			final BigInteger modulus = new BigInteger(privateKeyDataReader.readData());
-			final BigInteger publicExponent = new BigInteger(privateKeyDataReader.readData());
-			final BigInteger privateExponent = new BigInteger(privateKeyDataReader.readData());
-			final BigInteger crtCoefficient = new BigInteger(privateKeyDataReader.readData());
-			final BigInteger primeP = new BigInteger(privateKeyDataReader.readData());
-			final BigInteger primeQ = new BigInteger(privateKeyDataReader.readData());
-
-			String keyComment = new String(privateKeyDataReader.readData(), StandardCharsets.UTF_8);
-			keyComment = fixCommentEncodingIfNeeded(keyComment);
-
-			final byte[] paddingBytes = privateKeyDataReader.readLeftoverData();
-
-			for (int i = 0; i < paddingBytes.length; i++) {
-				if (paddingBytes[i] != i + 1) {
-					throw new Exception("Invalid private key padding found");
-				}
-			}
-
-			final KeyFactory keyFactory = KeyFactory.getInstance("RSA");
-			final PublicKey publicKey = keyFactory.generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
-
-			final BigInteger primeExponentP = privateExponent.mod(primeP.subtract(BigInteger.ONE)); // d mod (p-1) (= PrimeExponentP)
-			final BigInteger primeExponentQ = privateExponent.mod(primeQ.subtract(BigInteger.ONE)); // d mod (q-1) (= PrimeExponentQ)
-
-			final PrivateKey privateKey = keyFactory.generatePrivate(new RSAPrivateCrtKeySpec(modulus, publicExponent, privateExponent, primeP, primeQ, primeExponentP, primeExponentQ, crtCoefficient));
-
-			return new SshKey(SshKeyFormat.OpenSSHv1, keyComment, new KeyPair(publicKey, privateKey));
-		} else if (Algorithm.DSA == algorithm) {
-			final BigInteger p = new BigInteger(privateKeyDataReader.readData());
-			final BigInteger q = new BigInteger(privateKeyDataReader.readData());
-			final BigInteger g = new BigInteger(privateKeyDataReader.readData());
-			final BigInteger y = new BigInteger(privateKeyDataReader.readData());
-			final BigInteger x = new BigInteger(privateKeyDataReader.readData());
-
-			String keyComment = new String(privateKeyDataReader.readData(), StandardCharsets.UTF_8);
-			keyComment = fixCommentEncodingIfNeeded(keyComment);
-
-			final byte[] paddingBytes = privateKeyDataReader.readLeftoverData();
-
-			for (int i = 0; i < paddingBytes.length; i++) {
-				if (paddingBytes[i] != i + 1) {
-					throw new Exception("Invalid private key padding found");
-				}
-			}
-
-			final KeyFactory keyFactory = KeyFactory.getInstance("DSA");
-			final PublicKey publicKey = keyFactory.generatePublic(new DSAPublicKeySpec(y, p, q, g));
-			final PrivateKey privateKey = keyFactory.generatePrivate(new DSAPrivateKeySpec(x, p, q, g));
-
-			return new SshKey(SshKeyFormat.OpenSSHv1, keyComment, new KeyPair(publicKey, privateKey));
-		} else if (Algorithm.NISTP256 == algorithm
-				|| Algorithm.NISTP384 == algorithm
-				|| Algorithm.NISTP521 == algorithm) {
-			final String ecdsaCurveName = new String(privateKeyDataReader.readData(), StandardCharsets.UTF_8);
-
-			final byte[] eccKeyBlobBytes = privateKeyDataReader.readData();
-			final byte[] sBytes = privateKeyDataReader.readData();
-
-			String keyComment = new String(privateKeyDataReader.readData(), StandardCharsets.UTF_8);
-			keyComment = fixCommentEncodingIfNeeded(keyComment);
-
-			final byte[] paddingBytes = privateKeyDataReader.readLeftoverData();
-
-			for (int i = 0; i < paddingBytes.length; i++) {
-				if (paddingBytes[i] != i + 1) {
-					throw new Exception("Invalid private key padding found");
-				}
-			}
-
-			Security.addProvider(new BouncyCastleProvider());
-			final KeyFactory keyFactory = KeyFactory.getInstance("EC", BouncyCastleProvider.PROVIDER_NAME);
-			final AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
-			parameters.init(new ECGenParameterSpec(ecdsaCurveName.replace("nist", "sec") + "r1"));
-			final ECParameterSpec ecParameterSpec = parameters.getParameterSpec(ECParameterSpec.class);
-			final PrivateKey privateKey = keyFactory.generatePrivate(new ECPrivateKeySpec(new BigInteger(sBytes), ecParameterSpec));
-
-			final org.bouncycastle.jce.spec.ECNamedCurveParameterSpec ecSpec = ECNamedCurveTable.getParameterSpec(ecdsaCurveName.replace("nist", "sec") + "r1");
-			final org.bouncycastle.math.ec.ECPoint point = ecSpec.getCurve().decodePoint(eccKeyBlobBytes);
-			final org.bouncycastle.jce.spec.ECPublicKeySpec pubSpec = new org.bouncycastle.jce.spec.ECPublicKeySpec(point, ecSpec);
-			final PublicKey publicKey = keyFactory.generatePublic(pubSpec);
-			return new SshKey(SshKeyFormat.OpenSSHv1, keyComment, new KeyPair(publicKey, privateKey));
-		} else if (Algorithm.ED25519 == algorithm) {
-			final BigInteger checkBigInt1 = new BigInteger(privateKeyDataReader.readData());
-
-			final byte[] secretKeyBytes = privateKeyDataReader.readData();
-			final byte[] privateKeyBytes = Arrays.copyOfRange(secretKeyBytes, 0, secretKeyBytes.length / 2);
-			final byte[] edDsaPublicKeyData = Arrays.copyOfRange(secretKeyBytes, secretKeyBytes.length / 2, secretKeyBytes.length);
-
-			final BigInteger checkBigInt2 = new BigInteger(edDsaPublicKeyData);
-			if (!checkBigInt1.equals(checkBigInt2)) {
-				throw new WrongPasswordException();
-			}
-
-			String keyComment = new String(privateKeyDataReader.readData(), StandardCharsets.UTF_8);
-			keyComment = fixCommentEncodingIfNeeded(keyComment);
-
-			final byte[] paddingBytes = privateKeyDataReader.readLeftoverData();
-			for (int i = 0; i < paddingBytes.length; i++) {
-				if (paddingBytes[i] != i + 1) {
-					throw new Exception("Invalid private key padding found");
-				}
-			}
-
-			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
-			final boolean xOdd = (mostSignificantByte & 0x80) != 0;
-			edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-			reverseArray(edDsaPublicKeyData);
-
-			final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
-			final EdECPoint edECPoint = new EdECPoint(xOdd, y);
-
-			final PublicKey publicKey = KeyFactory.getInstance("Ed25519").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed25519"), edECPoint));
-			final PrivateKey privateKey = KeyFactory.getInstance("Ed25519").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed25519"), privateKeyBytes));
-			return new SshKey(SshKeyFormat.OpenSSHv1, keyComment, new KeyPair(publicKey, privateKey));
-		} else if (Algorithm.ED448 == algorithm) {
-			final BigInteger checkBigInt1 = new BigInteger(privateKeyDataReader.readData());
-
-			final byte[] secretKeyBytes = privateKeyDataReader.readData();
-			final byte[] privateKeyBytes = Arrays.copyOfRange(secretKeyBytes, 0, secretKeyBytes.length / 2);
-			final byte[] edDsaPublicKeyData = Arrays.copyOfRange(secretKeyBytes, secretKeyBytes.length / 2, secretKeyBytes.length);
-
-			final BigInteger checkBigInt2 = new BigInteger(edDsaPublicKeyData);
-			if (!checkBigInt1.equals(checkBigInt2)) {
-				throw new WrongPasswordException();
-			}
-
-			String keyComment = new String(privateKeyDataReader.readData(), StandardCharsets.UTF_8);
-			keyComment = fixCommentEncodingIfNeeded(keyComment);
-
-			final byte[] paddingBytes = privateKeyDataReader.readLeftoverData();
-
-			for (int i = 0; i < paddingBytes.length; i++) {
-				if (paddingBytes[i] != i + 1) {
-					throw new Exception("Invalid private key padding found");
-				}
-			}
-
-			final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
-			final boolean xOdd = (mostSignificantByte & 0x80) != 0;
-			edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-			reverseArray(edDsaPublicKeyData);
-
-			final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
-			final EdECPoint edECPoint = new EdECPoint(xOdd, y);
-
-			final PublicKey publicKey = KeyFactory.getInstance("Ed448").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed448"), edECPoint));
-			final PrivateKey privateKey = KeyFactory.getInstance("Ed448").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed448"), privateKeyBytes));
-			return new SshKey(SshKeyFormat.OpenSSHv1, keyComment, new KeyPair(publicKey, privateKey));
-		} else {
-			throw new Exception("Unexpected key type '" + algorithm.name() + "'");
-		}
-	}
-
-	/**
-	 * <b>Security note:</b> This implements the legacy OpenSSL "EVP_BytesToKey" key derivation
-	 * (single MD5 round, no configurable work factor), as mandated by the classic "Proc-Type:
-	 * 4,ENCRYPTED" PEM format for backward compatibility. This scheme is inherently weak against
-	 * brute-force attacks by modern standards and has been deprecated by OpenSSL itself in favor of
-	 * encrypted PKCS#8. It cannot be strengthened here without breaking compatibility with existing
-	 * files in this legacy format; prefer PKCS#8 or OpenSSH v1 encrypted key formats where possible.
-	 */
-	private static byte[] stretchPasswordForOpenSsl(final Password password, final byte[] iv, final int usingIvSize, final int keySize, final Charset passwordCharset) throws Exception {
-		final byte[] passwordBytes = StandardCharsets.UTF_8.equals(passwordCharset) ? password.getPasswordBytesUtfEncoded() : password.getPasswordBytesIsoEncoded();
-		final MessageDigest hash = MessageDigest.getInstance("MD5");
-		final byte[] key = new byte[keySize];
-		int hashesSize = keySize & 0XFFFFFFF0;
-
-		if ((keySize & 0XF) != 0) {
-			hashesSize += 0x10;
-		}
-
-		final byte[] hashes = new byte[hashesSize];
-		byte[] previous;
-		for (int index = 0; (index + 0x10) <= hashes.length; hash.update(previous, 0, previous.length)) {
-			hash.update(passwordBytes, 0, passwordBytes.length);
-			hash.update(iv, 0, usingIvSize);
-			previous = hash.digest();
-			System.arraycopy(previous, 0, hashes, index, previous.length);
-			index += previous.length;
-		}
-
-		System.arraycopy(hashes, 0, key, 0, key.length);
-		return key;
-	}
-
-	private static byte[] fromHexString(final String value) {
-		if (value == null) {
-			return null;
-		} else {
-			final int length = value.length();
-			final byte[] data = new byte[length / 2];
-			for (int i = 0; i < length; i += 2) {
-				data[i / 2] = (byte) ((Character.digit(value.charAt(i), 16) << 4) + Character.digit(value.charAt(i + 1), 16));
-			}
-			return data;
-		}
-	}
-
-	private static String toHexString(final byte[] data) {
-		final StringBuilder returnString = new StringBuilder();
-		for (final byte dataByte : data) {
-			returnString.append(String.format("%02X", dataByte));
-		}
-		return returnString.toString();
-	}
-
-	private static byte[] removeLengthCodedPadding(final byte[] data) {
-		final int paddingSize = data[data.length - 1];
-		if (paddingSize > 0) {
-			final byte[] dataUnpadded = new byte[data.length - paddingSize];
-			System.arraycopy(data, 0, dataUnpadded, 0, dataUnpadded.length);
-			return dataUnpadded;
-		} else {
-			return data;
-		}
-	}
-
-	private static SshKey readPuttyVersion2Key(final Map<String, String> keyProperties, final Password password, final boolean skipPrivateKey) throws Exception {
-		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(keyProperties.get("PuTTY-User-Key-File-2"));
-		if (Algorithm.RSA != algorithm
-				&& Algorithm.DSA != algorithm
-				&& Algorithm.NISTP256 != algorithm
-				&& Algorithm.NISTP384 != algorithm
-				&& Algorithm.NISTP521 != algorithm
-				&& Algorithm.ED25519 != algorithm
-				&& Algorithm.ED448 != algorithm) {
-			throw new Exception("Unsupported cipher: " + algorithm.name());
-		} else {
-			final Decoder base64Decoder = Base64.getDecoder();
-
-			final byte[] publicKeyData = base64Decoder.decode(keyProperties.get("Public-Lines"));
-
-			if (skipPrivateKey) {
-				return new SshKey(SshKeyFormat.Putty2, keyProperties.get("Comment"), readPuttyKeyData(null, publicKeyData));
-			}
-
-			final String encryptionMethod = keyProperties.get("Encryption");
-
-			byte[] passwordByteArray = null;
-			byte[] privateKeyData;
-			if (encryptionMethod == null || "".equals(encryptionMethod) || "none".equalsIgnoreCase(encryptionMethod)) {
-				privateKeyData = base64Decoder.decode(keyProperties.get("Private-Lines"));
-			} else if ("aes256-cbc".equalsIgnoreCase(encryptionMethod)) {
-				if (password == null || password.getPasswordChars() == null || password.getPasswordChars().length == 0) {
-					throw new WrongPasswordException();
-				} else {
-					passwordByteArray = password.getPasswordBytesIsoEncoded();
-				}
-
-				byte[] puttyKeyEncryptionKey = null;
-				try {
-					final Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
-					puttyKeyEncryptionKey = getPuttyPrivateKeyEncryptionKeyVersion2(passwordByteArray);
-					cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(puttyKeyEncryptionKey, 0, 32, "AES"), new IvParameterSpec(new byte[16])); // initial vector=0
-
-					privateKeyData = cipher.doFinal(base64Decoder.decode(keyProperties.get("Private-Lines")));
-				} catch (final Exception e) {
-					throw new Exception("Cannot decrypt PuTTY private key data", e);
-				} finally {
-					clear(puttyKeyEncryptionKey);
-				}
-			} else {
-				throw new Exception("Unsupported key encryption method: " + encryptionMethod);
-			}
-
-			try {
-				final String calculatedMacChecksum = calculatePuttyMacChecksumVersion2(passwordByteArray, algorithm, keyProperties.get("Encryption"), keyProperties.get("Comment"), publicKeyData, privateKeyData);
-				final String foundMacChecksum = keyProperties.get("Private-MAC");
-				if (foundMacChecksum == null || !foundMacChecksum.equalsIgnoreCase(calculatedMacChecksum)) {
-					throw new WrongPasswordException();
-				}
-			} catch (final WrongPasswordException e) {
-				throw e;
-			} catch (final Exception e) {
-				throw new Exception("Invalid PuTTY key data: " + e.getMessage(), e);
-			}
-
-			final KeyPair keyPair = readPuttyKeyData(privateKeyData, publicKeyData);
-			return new SshKey(SshKeyFormat.Putty2, keyProperties.get("Comment"), keyPair);
-		}
-	}
-
-	private static byte[] getPuttyPrivateKeyEncryptionKeyVersion2(final byte[] passwordByteArray) throws NoSuchAlgorithmException {
-		final byte[] puttyKeyEncryptionKey = new byte[32];
-		final MessageDigest digest = MessageDigest.getInstance("SHA-1");
-
-		digest.update(new byte[] { 0, 0, 0, 0 });
-		digest.update(passwordByteArray);
-		final byte[] key1 = digest.digest();
-
-		digest.update(new byte[] { 0, 0, 0, 1 });
-		digest.update(passwordByteArray);
-		final byte[] key2 = digest.digest();
-
-		System.arraycopy(key1, 0, puttyKeyEncryptionKey, 0, 20);
-		System.arraycopy(key2, 0, puttyKeyEncryptionKey, 20, 12);
-		return puttyKeyEncryptionKey;
-	}
-
-	private static String calculatePuttyMacChecksumVersion2(final byte[] passwordBytes, final Algorithm algorithm, final String encryptionType, final String comment, final byte[] publicKey, final byte[] privateKey) throws Exception {
-		final MessageDigest digest = MessageDigest.getInstance("SHA-1");
-		digest.update("putty-private-key-file-mac-key".getBytes(StandardCharsets.UTF_8));
-		if (passwordBytes != null) {
-			digest.update(passwordBytes);
-		}
-		final byte[] key = digest.digest();
-
-		final Mac mac = Mac.getInstance("HmacSHA1");
-		mac.init(new SecretKeySpec(key, 0, 20, mac.getAlgorithm()));
-
-		final ByteArrayOutputStream out = new ByteArrayOutputStream();
-		final DataOutputStream data = new DataOutputStream(out);
-
-		final byte[] keyTypeBytes = algorithm.getSshAlgorithmId().getBytes(StandardCharsets.ISO_8859_1);
-		data.writeInt(keyTypeBytes.length);
-		data.write(keyTypeBytes);
-
-		final byte[] encryptionTypeBytes = encryptionType.getBytes(StandardCharsets.ISO_8859_1);
-		data.writeInt(encryptionTypeBytes.length);
-		data.write(encryptionTypeBytes);
-
-		final byte[] commentBytes = (comment == null ? "" : comment).getBytes(StandardCharsets.ISO_8859_1);
-		data.writeInt(commentBytes.length);
-		data.write(commentBytes);
-
-		data.writeInt(publicKey.length);
-		data.write(publicKey);
-
-		data.writeInt(privateKey.length);
-		data.write(privateKey);
-
-		return toHexString(mac.doFinal(out.toByteArray())).toLowerCase();
-	}
-
-	private static SshKey readPuttyVersion3Key(final Map<String, String> keyProperties, final Password password, final boolean skipPrivateKey) throws Exception {
-		final Algorithm algorithm = Algorithm.getForSshAlgorithmId(keyProperties.get("PuTTY-User-Key-File-3"));
-		if (Algorithm.RSA != algorithm
-				&& Algorithm.DSA != algorithm
-				&& Algorithm.NISTP256 != algorithm
-				&& Algorithm.NISTP384 != algorithm
-				&& Algorithm.NISTP521 != algorithm
-				&& Algorithm.ED25519 != algorithm
-				&& Algorithm.ED448 != algorithm) {
-			throw new Exception("Unsupported chipher: " + algorithm.name());
-		}
-
-		final Decoder base64Decoder = Base64.getDecoder();
-
-		final byte[] publicKeyData = base64Decoder.decode(keyProperties.get("Public-Lines"));
-
-		if (skipPrivateKey) {
-			return new SshKey(SshKeyFormat.Putty3, keyProperties.get("Comment"), readPuttyKeyData(null, publicKeyData));
-		}
-
-		final String encryptionMethod = keyProperties.get("Encryption");
-
-		byte[] passwordByteArray = null;
-		byte[] privateKeyData;
-		byte[] puttyKeyEncryptionKey = null;
-		try {
-			if (encryptionMethod == null || "".equals(encryptionMethod) || "none".equalsIgnoreCase(encryptionMethod)) {
-				privateKeyData = base64Decoder.decode(keyProperties.get("Private-Lines"));
-			} else if ("aes256-cbc".equalsIgnoreCase(encryptionMethod)) {
-				if (password == null || password.getPasswordChars() == null || password.getPasswordChars().length == 0) {
-					throw new WrongPasswordException();
-				} else {
-					passwordByteArray = password.getPasswordBytesIsoEncoded();
-				}
-
-				try {
-					puttyKeyEncryptionKey = getPuttyPrivateKeyEncryptionKeyVersion3Argon2(passwordByteArray, keyProperties.get("Key-Derivation"), Integer.parseInt(keyProperties.get("Argon2-Memory")), Integer.parseInt(keyProperties.get("Argon2-Passes")), Integer.parseInt(keyProperties.get("Argon2-Parallelism")), fromHexString(keyProperties.get("Argon2-Salt")));
-					final Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
-					cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(puttyKeyEncryptionKey, 0, 32, "AES"), new IvParameterSpec(puttyKeyEncryptionKey, 32, 16));
-
-					privateKeyData = cipher.doFinal(base64Decoder.decode(keyProperties.get("Private-Lines")));
-				} catch (final Exception e) {
-					throw new Exception("Cannot decrypt PuTTY private key data", e);
-				}
-			} else {
-				throw new Exception("Unsupported key encryption method: " + keyProperties.get("Encryption"));
-			}
-
-			try {
-				final String calculatedMacChecksum;
-				if ("none".equalsIgnoreCase(encryptionMethod)) {
-					calculatedMacChecksum = calculatePuttyMacChecksumVersion3Argon2(algorithm, "none", keyProperties.get("Comment"), publicKeyData, privateKeyData, puttyKeyEncryptionKey);
-				} else if ("aes256-cbc".equalsIgnoreCase(encryptionMethod)) {
-					calculatedMacChecksum = calculatePuttyMacChecksumVersion3Argon2(algorithm, keyProperties.get("Encryption"), keyProperties.get("Comment"), publicKeyData, privateKeyData, puttyKeyEncryptionKey);
-				} else {
-					throw new Exception("Unsupported key encryption method: " + keyProperties.get("Encryption"));
-				}
-				final String foundMacChecksum = keyProperties.get("Private-MAC");
-				if (foundMacChecksum == null || !foundMacChecksum.equalsIgnoreCase(calculatedMacChecksum)) {
-					throw new WrongPasswordException();
-				}
-			} catch (final WrongPasswordException e) {
-				throw e;
-			} catch (final Exception e) {
-				throw new Exception("Invalid PuTTY key data: " + e.getMessage(), e);
-			}
-		} finally {
-			clear(puttyKeyEncryptionKey);
-		}
-
-		final KeyPair keyPair = readPuttyKeyData(privateKeyData, publicKeyData);
-		return new SshKey(SshKeyFormat.Putty3, keyProperties.get("Comment"), keyPair);
-	}
-
-	private static byte[] getPuttyPrivateKeyEncryptionKeyVersion3Argon2(final byte[] passwordByteArray, final String argon2Type, final int argon2Memory, final int argon2Passes, final int argon2Parallelism, final byte[] argon2Salt) throws Exception {
-		int argon2TypeInt;
-		if ("Argon2i".equalsIgnoreCase(argon2Type)) {
-			argon2TypeInt = Argon2Parameters.ARGON2_i;
-		} else if ("Argon2d".equalsIgnoreCase(argon2Type)) {
-			argon2TypeInt = Argon2Parameters.ARGON2_d;
-		} else if ("Argon2id".equalsIgnoreCase(argon2Type)) {
-			argon2TypeInt = Argon2Parameters.ARGON2_id;
-		} else {
-			throw new Exception("Unsupported Key-Derivation (Only \"Argon2i\", \"Argon2d\", \"Argon2id\" are supported): " + argon2Type);
-		}
-		final Argon2Parameters.Builder builder = new Argon2Parameters.Builder(argon2TypeInt)
-				.withVersion(Argon2Parameters.ARGON2_VERSION_13)
-				.withIterations(argon2Passes)
-				.withMemoryAsKB(argon2Memory)
-				.withParallelism(argon2Parallelism)
-				.withSalt(argon2Salt);
-		final Argon2BytesGenerator argon2BytesGenerator = new Argon2BytesGenerator();
-		argon2BytesGenerator.init(builder.build());
-		final byte[] puttyKeyEncryptionKey = new byte[80];
-		argon2BytesGenerator.generateBytes(passwordByteArray, puttyKeyEncryptionKey);
-		return puttyKeyEncryptionKey;
-	}
-
-	private static String calculatePuttyMacChecksumVersion3Argon2(final Algorithm algorithm, final String encryptionType, final String comment, final byte[] publicKey, final byte[] privateKey, final byte[] puttyKeyEncryptionKey) throws Exception {
-		final Mac mac = Mac.getInstance("HMACSHA256");
-		if (puttyKeyEncryptionKey != null) {
-			mac.init(new SecretKeySpec(puttyKeyEncryptionKey, 48, 32, mac.getAlgorithm()));
-		} else {
-			mac.init(new SecretKeySpec(new byte[32], 0, 32, mac.getAlgorithm()));
-		}
-
-		final ByteArrayOutputStream out = new ByteArrayOutputStream();
-		final DataOutputStream data = new DataOutputStream(out);
-
-		final byte[] keyTypeBytes = algorithm.getSshAlgorithmId().getBytes(StandardCharsets.ISO_8859_1);
-		data.writeInt(keyTypeBytes.length);
-		data.write(keyTypeBytes);
-
-		final byte[] encryptionTypeBytes = encryptionType.getBytes(StandardCharsets.ISO_8859_1);
-		data.writeInt(encryptionTypeBytes.length);
-		data.write(encryptionTypeBytes);
-
-		final byte[] commentBytes = (comment == null ? "" : comment).getBytes(StandardCharsets.ISO_8859_1);
-		data.writeInt(commentBytes.length);
-		data.write(commentBytes);
-
-		data.writeInt(publicKey.length);
-		data.write(publicKey);
-
-		data.writeInt(privateKey.length);
-		data.write(privateKey);
-
-		return toHexString(mac.doFinal(out.toByteArray())).toLowerCase();
-	}
-
-	private static KeyPair readPuttyKeyData(final byte[] privateKeyData, final byte[] publicKeyData) throws Exception {
-		try {
-			final BlockDataReader publicKeyReader = new BlockDataReader(publicKeyData);
-			final Algorithm algorithm = Algorithm.getForSshAlgorithmId(new String(publicKeyReader.readData(), StandardCharsets.UTF_8));
-
-			if (Algorithm.RSA == algorithm) {
-				final BigInteger publicExponent = publicKeyReader.readBigInt();
-				final BigInteger modulus = publicKeyReader.readBigInt();
-
-				final KeyFactory keyFactory = KeyFactory.getInstance("RSA");
-				final PublicKey publicKey = keyFactory.generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
-
-				if (privateKeyData == null) {
-					return new KeyPair(publicKey, null);
-				} else {
-					final BlockDataReader privateKeyReader = new BlockDataReader(privateKeyData);
-
-					final BigInteger privateExponent = privateKeyReader.readBigInt();
-					final BigInteger p = privateKeyReader.readBigInt(); // secret prime factor (= PrimeP)
-					final BigInteger q = privateKeyReader.readBigInt(); // secret prime factor (= PrimeQ)
-					final BigInteger iqmp = privateKeyReader.readBigInt(); // q^-1 mod p (= CrtCoefficient)
-
-					final BigInteger dmp1 = privateExponent.mod(p.subtract(BigInteger.ONE)); // d mod (p-1) (= PrimeExponentP)
-					final BigInteger dmq1 = privateExponent.mod(q.subtract(BigInteger.ONE)); // d mod (q-1) (= PrimeExponentQ)
-
-					final PrivateKey privateKey = keyFactory.generatePrivate(new RSAPrivateCrtKeySpec(modulus, publicExponent, privateExponent, p, q, dmp1, dmq1, iqmp));
-					return new KeyPair(publicKey, privateKey);
-				}
-			} else if (Algorithm.DSA == algorithm) {
-				final BigInteger p = publicKeyReader.readBigInt();
-				final BigInteger q = publicKeyReader.readBigInt();
-				final BigInteger g = publicKeyReader.readBigInt();
-
-				// Public key exponent
-				final BigInteger y = publicKeyReader.readBigInt();
-
-				final KeyFactory keyFactory = KeyFactory.getInstance("DSA");
-				final PublicKey publicKey = keyFactory.generatePublic(new DSAPublicKeySpec(y, p, q, g));
-
-				if (privateKeyData == null) {
-					return new KeyPair(publicKey, null);
-				} else {
-					final BlockDataReader privateKeyReader = new BlockDataReader(privateKeyData);
-
-					// Private key exponent
-					final BigInteger x = privateKeyReader.readBigInt();
-
-					final PrivateKey privateKey = keyFactory.generatePrivate(new DSAPrivateKeySpec(x, p, q, g));
-					return new KeyPair(publicKey, privateKey);
-				}
-			} else if (Algorithm.NISTP256 == algorithm
-					|| Algorithm.NISTP384 == algorithm
-					|| Algorithm.NISTP521 == algorithm) {
-				final String ecdsaCurveName = new String(publicKeyReader.readData(), StandardCharsets.UTF_8);
-				if (!"nistp256".equals(ecdsaCurveName)
-						&& !"nistp384".equals(ecdsaCurveName)
-						&& !"nistp521".equals(ecdsaCurveName)) {
-					throw new Exception("Unsupported ECDSA curveName: " + ecdsaCurveName);
-				} else {
-					final byte[] eccKeyBlobBytes = publicKeyReader.readData();
-
-					Security.addProvider(new BouncyCastleProvider());
-					final KeyFactory keyFactory = KeyFactory.getInstance("EC", BouncyCastleProvider.PROVIDER_NAME);
-					final org.bouncycastle.jce.spec.ECNamedCurveParameterSpec ecSpec = ECNamedCurveTable.getParameterSpec(ecdsaCurveName.replace("nist", "sec") + "r1");
-					final org.bouncycastle.math.ec.ECPoint point = ecSpec.getCurve().decodePoint(eccKeyBlobBytes);
-					final org.bouncycastle.jce.spec.ECPublicKeySpec pubSpec = new org.bouncycastle.jce.spec.ECPublicKeySpec(point, ecSpec);
-					final PublicKey publicKey = keyFactory.generatePublic(pubSpec);
-
-					if (privateKeyData == null) {
-						return new KeyPair(publicKey, null);
-					} else {
-						final BlockDataReader privateKeyReader = new BlockDataReader(privateKeyData);
-						final BigInteger s = privateKeyReader.readBigInt();
-
-						final AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
-						parameters.init(new ECGenParameterSpec(ecdsaCurveName.replace("nist", "sec") + "r1"));
-						final ECParameterSpec ecParameterSpec = parameters.getParameterSpec(ECParameterSpec.class);
-						final PrivateKey privateKey = keyFactory.generatePrivate(new ECPrivateKeySpec(s, ecParameterSpec));
-
-						return new KeyPair(publicKey, privateKey);
-					}
-				}
-			} else if (Algorithm.ED25519 == algorithm) {
-				final byte[] edDsaPublicKeyData = publicKeyReader.readData();
-
-				final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
-				final boolean xOdd = (mostSignificantByte & 0x80) != 0;
-				edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-				reverseArray(edDsaPublicKeyData);
-
-				final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
-				final EdECPoint edECPoint = new EdECPoint(xOdd, y);
-
-				final PublicKey publicKey = KeyFactory.getInstance("Ed25519").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed25519"), edECPoint));
-
-				if (privateKeyData == null) {
-					return new KeyPair(publicKey, null);
-				} else {
-					final BlockDataReader privateKeyReader = new BlockDataReader(privateKeyData);
-					final byte[] privateKeyBytes = privateKeyReader.readData();
-					final PrivateKey privateKey = KeyFactory.getInstance("Ed25519").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed25519"), privateKeyBytes));
-					return new KeyPair(publicKey, privateKey);
-				}
-			} else if (Algorithm.ED448 == algorithm) {
-				final byte[] edDsaPublicKeyData = publicKeyReader.readData();
-
-				final byte mostSignificantByte = edDsaPublicKeyData[edDsaPublicKeyData.length - 1];
-				final boolean xOdd = (mostSignificantByte & 0x80) != 0;
-				edDsaPublicKeyData[edDsaPublicKeyData.length - 1] &= (byte) 0x7F;
-				reverseArray(edDsaPublicKeyData);
-
-				final BigInteger y = new BigInteger(1, edDsaPublicKeyData);
-				final EdECPoint edECPoint = new EdECPoint(xOdd, y);
-
-				final PublicKey publicKey = KeyFactory.getInstance("Ed448").generatePublic(new EdECPublicKeySpec(new NamedParameterSpec("Ed448"), edECPoint));
-
-				if (privateKeyData == null) {
-					return new KeyPair(publicKey, null);
-				} else {
-					final BlockDataReader privateKeyReader = new BlockDataReader(privateKeyData);
-					final byte[] privateKeyBytes = privateKeyReader.readData();
-					final PrivateKey privateKey = KeyFactory.getInstance("Ed448").generatePrivate(new EdECPrivateKeySpec(new NamedParameterSpec("Ed448"), privateKeyBytes));
-					return new KeyPair(publicKey, privateKey);
-				}
-			} else {
-				throw new IllegalArgumentException("Invalid public key algorithm for PuTTY key (only supports RSA / DSA / ECDSA / EdDSA): " + algorithm.name());
-			}
-		} catch (final Exception e) {
-			throw new Exception("Cannot read key data", e);
-		}
-	}
-
-	/**
-	 * Fix the encoding of a String if it was stored in UTF-8 encoding but decoded with ISO-8859-1 encoding
-	 *
-	 * Examples of byte data of wrongly encoded Umlauts and other special characters:
-	 *	Ä: [-61, -124]
-	 *	ä: [-61, -92]
-	 *	ß: [-61, -97]
-	 *	è: [-61, -88]
-	 */
-	private static String fixCommentEncodingIfNeeded(final String comment) {
-		boolean wrongEncodingDetected = false;
-		for (final byte nextByte : comment.getBytes(StandardCharsets.ISO_8859_1)) {
-			if (nextByte == -61) {
-				wrongEncodingDetected = true;
-				break;
-			}
-		}
-		if (wrongEncodingDetected) {
-			return new String(comment.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
-		} else {
-			return comment;
-		}
-	}
-
-	private static byte[] reverseArray(final byte[] arrayData) {
-		for (int i = 0; i < arrayData.length / 2; i++) {
-			final int j = arrayData.length - 1 - i;
-			final byte tmp = arrayData[i];
-			arrayData[i] = arrayData[j];
-			arrayData[j] = tmp;
-		}
-		return arrayData;
-	}
-
-	private static void clear(final byte[] array) {
-		if (array != null) {
-			Arrays.fill(array, (byte) 0);
-		}
-	}
-
-	private static boolean isBlank(final String value) {
-		return value == null || value.length() == 0 || value.trim().length() == 0;
-	}
-
-	private static boolean isNotBlank(final String value) {
-		return !isBlank(value);
 	}
 }

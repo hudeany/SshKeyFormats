@@ -1,6 +1,11 @@
 package de.soderer.sshkeyformats;
 
+import java.security.Key;
 import java.security.KeyPair;
+import java.security.interfaces.DSAKey;
+import java.security.interfaces.ECKey;
+import java.security.interfaces.EdECKey;
+import java.security.interfaces.RSAKey;
 
 import de.soderer.sshkeyformats.data.Algorithm;
 import de.soderer.sshkeyformats.data.KeyPairUtilities;
@@ -70,25 +75,41 @@ public class SshKey {
 		if (keyPair == null) {
 			this.keyPair = null;
 		} else {
-			String algorithm = null;
-			if (keyPair.getPublic() != null) {
-				algorithm = keyPair.getPublic().getAlgorithm();
+			final String publicKeyType = getKeyType(keyPair.getPublic());
+			final String privateKeyType = getKeyType(keyPair.getPrivate());
+			if (keyPair.getPublic() == null && keyPair.getPrivate() == null) {
+				throw new IllegalArgumentException("KeyPair contains neither a public nor a private key");
+			} else if (keyPair.getPublic() != null && publicKeyType == null) {
+				throw new IllegalArgumentException("Unsupported SSH cipher algorithm for SSH key (only supports RSA / DSA / EC (ECDSA) / EdDSA): " + keyPair.getPublic().getAlgorithm());
+			} else if (keyPair.getPrivate() != null && privateKeyType == null) {
+				throw new IllegalArgumentException("Unsupported SSH cipher algorithm for SSH key (only supports RSA / DSA / EC (ECDSA) / EdDSA): " + keyPair.getPrivate().getAlgorithm());
+			} else if (publicKeyType != null && privateKeyType != null && !publicKeyType.equals(privateKeyType)) {
+				throw new IllegalArgumentException("SSH cipher algorithm of public key ('" + publicKeyType + "') and private key ('" + privateKeyType + "') do not match");
 			}
-			if (keyPair.getPrivate() != null) {
-				if (algorithm != null && !algorithm.equals(keyPair.getPrivate().getAlgorithm())) {
-					throw new IllegalArgumentException("SSH cipher algorithm of public key ('" + algorithm + "') and private key ('" + keyPair.getPrivate().getAlgorithm() + "') do not match");
-				} else {
-					algorithm = keyPair.getPrivate().getAlgorithm();
-				}
-			}
+			this.keyPair = keyPair;
+		}
+	}
 
-			if ("RSA".equals(algorithm)
-					|| "DSA".equals(algorithm)
-					|| "EC".equals(algorithm)
-					|| "EdDSA".equals(algorithm)) {
-				this.keyPair = keyPair;
+	/**
+	 * Determines the key type by the key interfaces, because the algorithm names differ between providers (e.g. "EdDSA" vs. "Ed25519", "EC" vs. "ECDSA").
+	 */
+	private static String getKeyType(final Key key) {
+		if (key == null) {
+			return null;
+		} else if (key instanceof RSAKey) {
+			return "RSA";
+		} else if (key instanceof DSAKey) {
+			return "DSA";
+		} else if (key instanceof ECKey) {
+			return "EC";
+		} else if (key instanceof EdECKey) {
+			return "EdDSA";
+		} else {
+			final String algorithm = key.getAlgorithm();
+			if ("EdDSA".equalsIgnoreCase(algorithm) || "Ed25519".equalsIgnoreCase(algorithm) || "Ed448".equalsIgnoreCase(algorithm)) {
+				return "EdDSA";
 			} else {
-				throw new IllegalArgumentException("Unsupported SSH cipher algorithm for SSH key (only supports RSA / DSA / EC (ECDSA) / EdDSA): " + algorithm);
+				return null;
 			}
 		}
 	}

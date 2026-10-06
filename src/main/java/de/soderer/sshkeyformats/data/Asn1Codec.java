@@ -2,10 +2,7 @@ package de.soderer.sshkeyformats.data;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.DataInput;
-import java.io.DataInputStream;
 import java.io.IOException;
-import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -50,59 +47,6 @@ public class Asn1Codec {
 	public static final int DER_TAG_CONTEXT_SPECIFIC_1 = 0xA1;
 
 /**
- * getAsnEncodedInteger operation.
- * @param value the value value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
-	public static byte[] getAsnEncodedInteger(final long value) throws Exception {
-		if (value < 0) {
-			throw new Exception("Minimum ASN.1 encoded Integer underrun");
-		} else if (value < 0x80) {
-			return new byte[] { (byte) value };
-		} else {
-			final ByteArrayOutputStream out = new ByteArrayOutputStream();
-			byte[] data = BigInteger.valueOf(value).toByteArray();
-			if (data[0] == 0) {
-				// Removed the obsolete sign bit, which caused an additional byte
-				final byte[] tmp = new byte[data.length - 1];
-				System.arraycopy(data, 1, tmp, 0, tmp.length);
-				data = tmp;
-			}
-			if (data.length >= 0x80) {
-				throw new Exception("Maximum ASN.1 encoded Integer exceeded");
-			}
-			out.write(0x80 | data.length);
-			out.write(data);
-			return out.toByteArray();
-		}
-	}
-
-/**
- * parseAsnEncodedInteger operation.
- * @param data the data value.
- * @param offset the offset value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
-	public static BigInteger parseAsnEncodedInteger(final byte[] data, final int offset) throws Exception {
-		try {
-			final DataInput blockDataInput = new DataInputStream(new ByteArrayInputStream(data));
-			blockDataInput.skipBytes(offset - 1);
-
-			final int nextBlockSize = blockDataInput.readInt();
-			if (nextBlockSize <= 0 || nextBlockSize > 513) {
-				throw new Exception("Blocksize error");
-			}
-			final byte[] nextBlock = new byte[nextBlockSize];
-			blockDataInput.readFully(nextBlock);
-			return new BigInteger(nextBlock);
-		} catch (final IOException e) {
-			throw new Exception("Block read error", e);
-		}
-	}
-
-/**
  * createDerTagData operation.
  * @param derTagId the derTagId value.
  * @param derDataItems the derDataItems value.
@@ -140,62 +84,6 @@ public class Asn1Codec {
 		return lengthInBytes;
 	}
 
-/**
- * readDerTag operation.
- * @param data the data value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
-	public static DerTag readDerTag(final byte[] data) throws Exception {
-		try {
-			final ByteArrayInputStream input = new ByteArrayInputStream(data);
-
-			final int tagId = input.read();
-
-			int tagLength;
-			final int lengthIndicatingValue = input.read();
-			if (lengthIndicatingValue < 0) {
-				throw new Exception("Unexpected end of data while reading DER tag length");
-			} else if (lengthIndicatingValue < 0x80) {
-				tagLength = lengthIndicatingValue;
-			} else {
-				final int tagLengthBytesCount = lengthIndicatingValue - 0x80;
-				tagLength = 0;
-				for (int i = 0; i < tagLengthBytesCount; i++) {
-					final int nextValue = input.read();
-					if (nextValue < 0) {
-						throw new Exception("Unexpected end of data while reading DER tag length");
-					}
-					tagLength = (tagLength << 8) + nextValue;
-				}
-			}
-
-			if (tagLength > MAX_DER_TAG_DATA_LENGTH) {
-				throw new Exception("DER tag length " + tagLength + " exceeds maximum allowed size of " + MAX_DER_TAG_DATA_LENGTH + " bytes");
-			}
-
-			// This tagLength might be invalid encoded, because of invalid decryption.
-			// So to prevent out of memory exception, read from input up to tagLength and stop if input hits EOF.
-			final ByteArrayOutputStream tagData = new ByteArrayOutputStream();
-			final byte[] buffer = new byte[8192];
-			int bytesRead = 0;
-			int tagLengthLeftToRead = tagLength;
-			while ((bytesRead = input.read(buffer, 0, tagLengthLeftToRead)) > 0) {
-				tagData.write(buffer, 0, bytesRead);
-				tagLengthLeftToRead = tagLengthLeftToRead - bytesRead;
-			}
-			final byte[] blockData = tagData.toByteArray();
-
-			if (blockData.length != tagLength) {
-				throw new Exception("Block length read error. Blocksize: " + data.length + " Tagsize: " + tagLength);
-			} else {
-				return new DerTag(tagId, tagData.toByteArray());
-			}
-		} catch (final IOException e) {
-			throw new Exception("Block read error", e);
-		}
-	}
-
 	/**
 	 * Sanity upper bound for a single DER tag's data, to protect against maliciously crafted or
 	 * corrupted key data that could otherwise force a huge memory allocation before any validation
@@ -203,59 +91,92 @@ public class Asn1Codec {
 	 */
 	private static final int MAX_DER_TAG_DATA_LENGTH = 16 * 1024 * 1024; // 16 MB
 
-/**
- * readDerTags operation.
- * @param data the data value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
-	public static List<DerTag> readDerTags(final byte[] data) throws Exception {
-		try {
-			final ByteArrayInputStream input = new ByteArrayInputStream(data);
-			final List<DerTag> returnList = new ArrayList<>();
-			while (input.available() > 0) {
-				final int tagId = input.read();
-
-				int tagLength;
-				final int lengthIndicatingValue = input.read();
-				if (lengthIndicatingValue < 0) {
-					throw new Exception("Unexpected end of data while reading DER tag length");
-				} else if (lengthIndicatingValue < 0x80) {
-					tagLength = lengthIndicatingValue;
-				} else {
-					final int tagLengthBytesCount = lengthIndicatingValue & 0x7F;
-					tagLength = 0;
-					for (int i = 0; i < tagLengthBytesCount; i++) {
-						final int nextByte = input.read();
-						if (nextByte < 0) {
-							throw new Exception("Unexpected end of data while reading DER tag length");
-						}
-						tagLength = (tagLength << 8) + nextByte;
-					}
-				}
-
-				if (tagLength < 0) {
-					throw new Exception("Invalid negative DER tag length: " + tagLength);
-				} else if (tagLength > MAX_DER_TAG_DATA_LENGTH) {
-					throw new Exception("DER tag length " + tagLength + " exceeds maximum allowed size of " + MAX_DER_TAG_DATA_LENGTH + " bytes");
-				}
-
-				final byte[] dataBlock = new byte[tagLength];
-				int totalBytesRead = 0;
-				while (totalBytesRead < dataBlock.length) {
-					final int bytesRead = input.read(dataBlock, totalBytesRead, dataBlock.length - totalBytesRead);
-					if (bytesRead < 0) {
-						throw new Exception("Unexpected end of data while reading DER tag data of length " + tagLength);
-					}
-					totalBytesRead += bytesRead;
-				}
-
-				returnList.add(new DerTag(tagId, dataBlock));
-			}
-			return returnList;
-		} catch (final IOException e) {
-			throw new Exception("Block read error", e);
+	/**
+	 * Reads the first DER tag of the given data. Any data following the first tag is ignored.
+	 *
+	 * @param data the DER encoded data
+	 * @return the first DER tag
+	 * @throws Exception if the data is not a valid DER tag
+	 */
+	public static DerTag readDerTag(final byte[] data) throws Exception {
+		if (data == null) {
+			throw new Exception("Invalid empty DER data");
 		}
+		final ByteArrayInputStream input = new ByteArrayInputStream(data);
+		final DerTag derTag = readNextDerTag(input);
+		if (derTag == null) {
+			throw new Exception("Unexpected end of data while reading DER tag");
+		}
+		return derTag;
+	}
+
+	/**
+	 * Reads all consecutive DER tags of the given data.
+	 *
+	 * @param data the DER encoded data
+	 * @return the DER tags in order of appearance
+	 * @throws Exception if the data is not a valid sequence of DER tags
+	 */
+	public static List<DerTag> readDerTags(final byte[] data) throws Exception {
+		if (data == null) {
+			throw new Exception("Invalid empty DER data");
+		}
+		final ByteArrayInputStream input = new ByteArrayInputStream(data);
+		final List<DerTag> returnList = new ArrayList<>();
+		DerTag nextDerTag;
+		while ((nextDerTag = readNextDerTag(input)) != null) {
+			returnList.add(nextDerTag);
+		}
+		return returnList;
+	}
+
+	/**
+	 * Reads the next DER tag from the input.
+	 *
+	 * @return the next DER tag, or {@code null} if the input is exhausted
+	 */
+	private static DerTag readNextDerTag(final ByteArrayInputStream input) throws Exception {
+		final int tagId = input.read();
+		if (tagId < 0) {
+			return null;
+		}
+
+		final int lengthIndicatingValue = input.read();
+		final int tagLength;
+		if (lengthIndicatingValue < 0) {
+			throw new Exception("Unexpected end of data while reading DER tag length");
+		} else if (lengthIndicatingValue < 0x80) {
+			tagLength = lengthIndicatingValue;
+		} else {
+			final int tagLengthBytesCount = lengthIndicatingValue & 0x7F;
+			if (tagLengthBytesCount == 0) {
+				throw new Exception("Unsupported DER indefinite length encoding");
+			} else if (tagLengthBytesCount > 4) {
+				throw new Exception("Invalid DER tag length encoding with " + tagLengthBytesCount + " length bytes");
+			}
+			long longTagLength = 0;
+			for (int i = 0; i < tagLengthBytesCount; i++) {
+				final int nextByte = input.read();
+				if (nextByte < 0) {
+					throw new Exception("Unexpected end of data while reading DER tag length");
+				}
+				longTagLength = (longTagLength << 8) + nextByte;
+			}
+			if (longTagLength > MAX_DER_TAG_DATA_LENGTH) {
+				throw new Exception("DER tag length " + longTagLength + " exceeds maximum allowed size of " + MAX_DER_TAG_DATA_LENGTH + " bytes");
+			}
+			tagLength = (int) longTagLength;
+		}
+
+		// The length might be invalid because of a wrong decryption password, so check the available data before allocating memory
+		if (tagLength > input.available()) {
+			throw new Exception("Block length read error. Available data: " + input.available() + " Tagsize: " + tagLength);
+		}
+		final byte[] dataBlock = new byte[tagLength];
+		if (input.read(dataBlock, 0, tagLength) != tagLength && tagLength > 0) {
+			throw new Exception("Unexpected end of data while reading DER tag data of length " + tagLength);
+		}
+		return new DerTag(tagId, dataBlock);
 	}
 
 /**
