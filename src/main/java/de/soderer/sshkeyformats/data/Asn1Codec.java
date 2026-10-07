@@ -46,13 +46,13 @@ public class Asn1Codec {
 	 */
 	public static final int DER_TAG_CONTEXT_SPECIFIC_1 = 0xA1;
 
-/**
- * createDerTagData operation.
- * @param derTagId the derTagId value.
- * @param derDataItems the derDataItems value.
- * @return the resulting value.
- * @throws IOException if the operation cannot be completed.
- */
+	/**
+	 * createDerTagData operation.
+	 * @param derTagId the derTagId value.
+	 * @param derDataItems the derDataItems value.
+	 * @return the resulting value.
+	 * @throws IOException if the operation cannot be completed.
+	 */
 	public static byte[] createDerTagData(final int derTagId, final byte[]... derDataItems) throws IOException {
 		final ByteArrayOutputStream out = new ByteArrayOutputStream();
 		out.write(derTagId);
@@ -185,60 +185,60 @@ public class Asn1Codec {
 		return new DerTag(tagId, dataBlock);
 	}
 
-/**
- * DerTag API.
- */
+	/**
+	 * DerTag API.
+	 */
 	public static class DerTag {
 		int tagId;
 		byte[] data;
 
-/**
- * DerTag operation.
- * @param tagId the tagId value.
- * @param data the data value.
- */
+		/**
+		 * DerTag operation.
+		 * @param tagId the tagId value.
+		 * @param data the data value.
+		 */
 		public DerTag(final int tagId, final byte[] data) {
 			this.tagId = tagId;
 			this.data = data == null ? null : data.clone();
 		}
 
-/**
- * getTagId operation.
- * @return the resulting value.
- */
+		/**
+		 * getTagId operation.
+		 * @return the resulting value.
+		 */
 		public int getTagId() {
 			return tagId;
 		}
 
-/**
- * setTagId operation.
- * @param tagId the tagId value.
- */
+		/**
+		 * setTagId operation.
+		 * @param tagId the tagId value.
+		 */
 		public void setTagId(final int tagId) {
 			this.tagId = tagId;
 		}
 
-/**
- * getData operation.
- * @return the resulting value.
- */
+		/**
+		 * getData operation.
+		 * @return the resulting value.
+		 */
 		public byte[] getData() {
 			return data == null ? null : data.clone();
 		}
 
-/**
- * setData operation.
- * @param data the data value.
- */
+		/**
+		 * setData operation.
+		 * @param data the data value.
+		 */
 		public void setData(final byte[] data) {
 			this.data = data == null ? null : data.clone();
 		}
 
 		@Override
-/**
- * toString operation.
- * @return the resulting value.
- */
+		/**
+		 * toString operation.
+		 * @return the resulting value.
+		 */
 		public String toString() {
 			return tagId + " (length " + data.length + "): " + Arrays.toString(data);
 		}
