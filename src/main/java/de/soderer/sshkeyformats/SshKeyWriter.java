@@ -8,6 +8,7 @@ import java.io.LineNumberReader;
 import java.io.OutputStream;
 import java.io.StringReader;
 import java.math.BigInteger;
+import java.nio.CharBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
@@ -44,43 +45,61 @@ import de.soderer.sshkeyformats.data.OID;
 import de.soderer.sshkeyformats.data.Password;
 
 /**
- * Writer for SSH public and private keys with optional password protection<br />
- * <br />
- * Supported key formats:<br />
- * - OpenSSHv1 (proprietary format of OpenSSH, "-----BEGIN OPENSSH PRIVATE KEY-----")<br />
- * - OpenSSL, PKCS#8 ("-----BEGIN RSA/DSA/EC PRIVATE KEY-----", doesn't support EdDSA)<br />
- * - PuTTY key version 2 ("PuTTY-User-Key-File-2: ...")<br />
- * - PuTTY key version 3 ("PuTTY-User-Key-File-3: ...")<br />
- * - PKCS#1 ("---- BEGIN SSH2 PRIVATE KEY ----", no password encryption)<br />
- * <br />
- * Supported cipher algorithms:<br />
- * - RSA<br />
- * - DSA<br />
- * - EC / ECDSA (nistp256, nistp384, nistp521)<br />
- * - EdDSA (Ed25519, Ed448)<br />
- * <br />
+ * Writer for SSH public and private keys with optional password protection.
+ * <p>
+ * Supported key formats:
+ * <ul>
+ * <li>OpenSSH v1 (proprietary format of OpenSSH, "-----BEGIN OPENSSH PRIVATE KEY-----", encrypted with bcrypt_pbkdf and aes256-ctr)</li>
+ * <li>OpenSSL traditional ("-----BEGIN RSA/DSA/EC PRIVATE KEY-----", optionally encrypted by "Proc-Type: 4,ENCRYPTED"),
+ * for EdDSA keys PKCS#8 ("-----BEGIN PRIVATE KEY-----") is used instead</li>
+ * <li>DER (binary, unencrypted)</li>
+ * <li>PuTTY key version 2 ("PuTTY-User-Key-File-2: ...")</li>
+ * <li>PuTTY key version 3 ("PuTTY-User-Key-File-3: ...", encrypted with Argon2id)</li>
+ * <li>RFC 4716 public keys ("---- BEGIN SSH2 PUBLIC KEY ----")</li>
+ * </ul>
+ * <p>
+ * Supported key algorithms:
+ * <ul>
+ * <li>RSA</li>
+ * <li>DSA</li>
+ * <li>EC / ECDSA (nistp256, nistp384, nistp521)</li>
+ * <li>EdDSA (Ed25519, Ed448)</li>
+ * </ul>
  */
 public class SshKeyWriter {
-	/**
-	 * Converts this keypair into protected OpenSSH format<br />
-	 * This format includes private and public key data and is accepted by PuTTY's key import<br />
-	 * <br />
-	 * passwordEncoding is used for encoding of password:<br />
-	 *	- default is "UTF-8"<br />
-	 *	- other value may be "ISO-8859-1"<br />
-	 * <br />
-	 * Watchout for PuTTY's key import can only use special characters in passwords, if the ISO-8859-1 encoding is used for passwordAndCommentEncoding.<br />
-	 * But OpenSSH's default encoding is UTF-8<br />
+	private SshKeyWriter() {
+		// Utility class, no instances
+	}
 
+	/**
+	 * Writes a key pair in OpenSSH v1 format ("-----BEGIN OPENSSH PRIVATE KEY-----").
+	 * <p>
+	 * This format includes private and public key data and the comment and is accepted by PuTTY's key import.
+	 * When a password is given, the private key is encrypted with "aes256-ctr" and the key derivation function "bcrypt" (16 rounds).
+	 * <p>
+	 * passwordAndCommentEncoding is used for the encoding of password and comment:
+	 * <ul>
+	 * <li>"UTF-8" (default, used by OpenSSH's ssh-keygen)</li>
+	 * <li>"ISO-8859-1" (used by PuTTY's key import on Windows for special characters in passwords)</li>
+	 * </ul>
+	 *
 	 * @param outputStream the stream receiving the encoded key
-	 * @param sshKey the SSH key to write
-	 * @param passwordChars the optional password used to encrypt the private key
-	 * @param passwordAndCommentEncoding the character encoding for the password and comment, or {@code null} for UTF-8
-	 * @throws Exception if the key cannot be encoded or written
+	 * @param sshKey the SSH key to write, which must contain a private and a public key
+	 * @param passwordChars the optional password used to encrypt the private key, {@code null} or empty for no encryption
+	 * @param passwordAndCommentEncoding the character encoding for the password and comment (UTF-8 or ISO-8859-1), or {@code null} for UTF-8
+	 * @throws Exception if the key cannot be encoded or written, the encoding is unsupported or the password contains characters not representable in ISO-8859-1
 	 */
 	public static void writeOpenSshv1Key(final OutputStream outputStream, final SshKey sshKey, final char[] passwordChars, Charset passwordAndCommentEncoding) throws Exception {
 		if (passwordAndCommentEncoding == null) {
 			passwordAndCommentEncoding = StandardCharsets.UTF_8;
+		} else if (!StandardCharsets.UTF_8.equals(passwordAndCommentEncoding) && !StandardCharsets.ISO_8859_1.equals(passwordAndCommentEncoding)) {
+			throw new Exception("Unsupported passwordAndCommentEncoding: " + passwordAndCommentEncoding.name());
+		}
+		if (StandardCharsets.ISO_8859_1.equals(passwordAndCommentEncoding)) {
+			checkIsoEncodable(passwordChars, "password");
+			if (sshKey.getComment() != null) {
+				checkIsoEncodable(sshKey.getComment().toCharArray(), "comment");
+			}
 		}
 
 		final byte[] publicKeyData = KeyPairUtilities.getPublicKeyBytes(sshKey.getKeyPair().getPublic());
@@ -142,11 +161,13 @@ public class SshKeyWriter {
 					privateKeyDataBytesEncrypted = cipher.doFinal(privateKeyData);
 				} finally {
 					clear(derivedKeyBytes);
+					clear(privateKeyData);
 				}
 
 				keyDataBuffer.writeData(privateKeyDataBytesEncrypted);
 			} else {
 				keyDataBuffer.writeData(privateKeyData);
+				clear(privateKeyData);
 			}
 		}
 
@@ -158,6 +179,8 @@ public class SshKeyWriter {
 	private static byte[] getOpenSshv1PrivateKeyBytes(final SshKey sshKey, final Charset commentCharset) throws Exception {
 		if (sshKey.getKeyPair().getPrivate() == null) {
 			throw new Exception("Invalid empty privateKey parameter");
+		} else if (sshKey.getKeyPair().getPublic() == null) {
+			throw new Exception("Invalid empty publicKey parameter");
 		} else {
 			final BlockDataWriter privateKeyWriter = new BlockDataWriter();
 			final int checkInt = new SecureRandom().nextInt();
@@ -320,7 +343,7 @@ public class SshKeyWriter {
 			}
 		}
 
-		private void writeZeroLimitedData(final byte[] value) throws IOException, Exception {
+		private void writeZeroLimitedData(final byte[] value) throws Exception {
 			keyDataOutput.write(value);
 			keyDataOutput.write(new byte[] { 0 });
 		}
@@ -331,9 +354,11 @@ public class SshKeyWriter {
 	}
 
 	/**
-	 * Converts this public key into unprotected PEM format (PKCS#1) for OpenSSH keys<br />
-	 * This format includes public key data only and is NOT accepted by PuTTY's key import<br />
-
+	 * Writes a public key in RFC 4716 format ("---- BEGIN SSH2 PUBLIC KEY ----", also known as SSH2 or SECSH public key format).
+	 * <p>
+	 * Despite the method name, this is not the PEM encoded PKCS#1 format ("-----BEGIN RSA PUBLIC KEY-----").
+	 * The format includes public key data only and is accepted by PuTTY and by "ssh-keygen -i -m RFC4716".
+	 *
 	 * @param outputStream the stream receiving the encoded key
 	 * @param publicKey the public key to write
 	 * @throws Exception if the key cannot be encoded or written
@@ -352,46 +377,49 @@ public class SshKeyWriter {
 	}
 
 	/**
-	 * Converts this key into PEM format (PKCS#8) for OpenSSH keys<br />
-	 * Using default encryption method "AES-128-CBC", when the optional password is set.<br />
-	 * This format includes private and public key data and is accepted by PuTTY's key import.<br />
-	 * <br />
-	 * Watchout for PuTTY's key import can only use special characters in passwords, if the ISO-8859-1 encoding is used for passwordEncoding.<br />
-	 * But OpenSSH's default encoding is UTF-8<br />
-
+	 * Writes a key pair in OpenSSL PEM format, encrypted with "AES-128-CBC" when a password is given.
+	 * <p>
+	 * RSA, DSA and EC keys are written in the traditional OpenSSL format ("-----BEGIN RSA/DSA/EC PRIVATE KEY-----"),
+	 * EdDSA keys in unencrypted PKCS#8 structure ("-----BEGIN PRIVATE KEY-----").
+	 * Encryption uses the legacy PEM encryption ("Proc-Type: 4,ENCRYPTED") with OpenSSL's weak EVP_BytesToKey key derivation.
+	 *
 	 * @param outputStream the stream receiving the encoded key
-	 * @param keyPair the key pair to write
-	 * @param passwordChars the optional password used to encrypt the private key
-	 * @param passwordEncoding the character encoding for the password, or {@code null} for UTF-8
+	 * @param keyPair the key pair to write, which must contain a private key
+	 * @param passwordChars the optional password used to encrypt the private key, {@code null} or empty for no encryption
+	 * @param passwordEncoding the character encoding for the password (UTF-8 or ISO-8859-1), or {@code null} for UTF-8
 	 * @throws Exception if the key cannot be encoded or written
+	 * @see #writePKCS8Format(OutputStream, KeyPair, String, char[], Charset)
 	 */
 	public static void writePKCS8Format(final OutputStream outputStream, final KeyPair keyPair, final char[] passwordChars, final Charset passwordEncoding) throws Exception {
 		writePKCS8Format(outputStream, keyPair, null, passwordChars, passwordEncoding);
 	}
 
 	/**
-	 * Converts this keypair into protected PEM format (PKCS#8) for OpenSSL keys<br />
-	 * This format includes private and public key data and is accepted by PuTTY's key import<br />
-	 * <br />
-	 * keyEncryptionCipherName:<br />
-	 *	- default is "AES-128-CBC"<br />
-	 *	- other value may be "DES-EDE3-CBC"<br />
-	 * <br />
-	 * passwordEncoding is used for encoding of password:<br />
-	 *	- default is "UTF-8"<br />
-	 *	- other value may be "ISO-8859-1"<br />
-	 * <br />
-	 * Watchout for PuTTY's key import can only use special characters in passwords, if the ISO-8859-1 encoding is used for passwordEncoding.<br />
-	 * But OpenSSH's default encoding is UTF-8<br />
-
+	 * Writes a key pair in OpenSSL PEM format, optionally encrypted with the given cipher.
+	 * <p>
+	 * RSA, DSA and EC keys are written in the traditional OpenSSL format ("-----BEGIN RSA/DSA/EC PRIVATE KEY-----", PKCS#1 / SEC1 structure),
+	 * EdDSA keys in PKCS#8 structure ("-----BEGIN PRIVATE KEY-----"), because they have no traditional format.
+	 * This format includes private and public key data and is accepted by PuTTY's key import.
+	 * <p>
+	 * Supported values for keyEncryptionCipherName: "AES-128-CBC" (default), "AES-192-CBC", "AES-256-CBC", "DES-EDE3-CBC".
+	 * <p>
+	 * passwordEncoding is used for the encoding of the password:
+	 * <ul>
+	 * <li>"UTF-8" (default, used by OpenSSH and OpenSSL)</li>
+	 * <li>"ISO-8859-1" (used by PuTTY's key import on Windows for special characters in passwords)</li>
+	 * </ul>
+	 * <b>Security note:</b> The legacy PEM encryption ("Proc-Type: 4,ENCRYPTED") uses OpenSSL's EVP_BytesToKey key derivation (single MD5 round),
+	 * which offers only weak protection against brute force attacks. Prefer {@link #writeOpenSshv1Key(OutputStream, SshKey, char[], Charset)} for password protected keys.
+	 *
 	 * @param outputStream the stream receiving the encoded key
-	 * @param keyPair the key pair to write
-	 * @param keyEncryptionCipherName the encryption cipher name, or {@code null} for the default
-	 * @param passwordChars the optional password used to encrypt the private key
-	 * @param passwordEncoding the character encoding for the password, or {@code null} for UTF-8
-	 * @throws Exception if the key cannot be encoded or written
+	 * @param keyPair the key pair to write, which must contain a private key
+	 * @param keyEncryptionCipherName the encryption cipher name, or {@code null} for the default "AES-128-CBC"
+	 * @param passwordChars the optional password used to encrypt the private key, {@code null} or empty for no encryption
+	 * @param passwordEncoding the character encoding for the password (UTF-8 or ISO-8859-1), or {@code null} for UTF-8
+	 * @throws Exception if the key cannot be encoded or written, the cipher or encoding is unsupported or the password contains characters not representable in ISO-8859-1
 	 */
 	public static void writePKCS8Format(final OutputStream outputStream, final KeyPair keyPair, String keyEncryptionCipherName, final char[] passwordChars, final Charset passwordEncoding) throws Exception {
+		checkPrivateKey(keyPair);
 		String keyTypeName;
 		byte[] keyData;
 		final Algorithm algorithm = KeyPairUtilities.getAlgorithm(keyPair);
@@ -430,6 +458,7 @@ public class SshKeyWriter {
 				} else if (StandardCharsets.UTF_8.equals(passwordEncoding)) {
 					passwordBytes = password.getPasswordBytesUtfEncoded();
 				} else if (StandardCharsets.ISO_8859_1.equals(passwordEncoding)) {
+					checkIsoEncodable(passwordChars, "password");
 					passwordBytes = password.getPasswordBytesIsoEncoded();
 				} else {
 					throw new Exception("Unsupported passwordEncoding: " + passwordEncoding.name());
@@ -482,11 +511,16 @@ public class SshKeyWriter {
 				} finally {
 					clear(key);
 				}
-				keyData = addLengthCodedPadding(keyData, blockSize);
+				final byte[] paddedKeyData = addLengthCodedPadding(keyData, blockSize);
+				clear(keyData);
 				headers.put("Proc-Type", "4,ENCRYPTED");
 				headers.put("DEK-Info", keyEncryptionCipherName.trim().toUpperCase() + "," + ivString);
 
-				keyData = cipher.doFinal(keyData);
+				try {
+					keyData = cipher.doFinal(paddedKeyData);
+				} finally {
+					clear(paddedKeyData);
+				}
 			}
 		}
 
@@ -497,13 +531,17 @@ public class SshKeyWriter {
 	}
 
 	/**
-	 * Converts the supplied key pair into unprotected DER format (binary data).
-	 * <p>Use with caution, because this key format is not protected by any password.</p>
+	 * Writes the supplied key pair in unprotected DER format (binary data).
+	 * <p>
+	 * RSA, DSA and EC keys use the traditional OpenSSL structure (PKCS#1 / SEC1), EdDSA keys the PKCS#8 structure.
+	 * Use with caution, because this key format is not protected by any password.
+	 *
 	 * @param outputStream stream receiving the DER encoded key.
-	 * @param keyPair key pair to encode.
+	 * @param keyPair key pair to encode, which must contain a private key.
 	 * @throws Exception if the key cannot be converted or written.
 	 */
 	public static void writeDerFormat(final OutputStream outputStream, final KeyPair keyPair) throws Exception {
+		checkPrivateKey(keyPair);
 		final Algorithm algorithm = KeyPairUtilities.getAlgorithm(keyPair);
 		if (Algorithm.RSA == algorithm) {
 			outputStream.write(createRsaBinaryKey(keyPair));
@@ -520,6 +558,19 @@ public class SshKeyWriter {
 			outputStream.write(keyPair.getPrivate().getEncoded());
 		} else {
 			throw new IllegalArgumentException("Unsupported cipher: " + algorithm.name());
+		}
+	}
+
+	/**
+	 * Checks that the key pair contains a private key and, for RSA, that it contains the CRT parameters needed by all private key formats.
+	 */
+	private static void checkPrivateKey(final KeyPair keyPair) throws Exception {
+		if (keyPair == null || keyPair.getPrivate() == null) {
+			throw new Exception("Invalid empty privateKey parameter");
+		} else if (keyPair.getPrivate() instanceof java.security.interfaces.RSAPrivateKey && !(keyPair.getPrivate() instanceof RSAPrivateCrtKey)) {
+			throw new Exception("RSA private key without CRT parameters is not supported");
+		} else if ((keyPair.getPrivate() instanceof DSAPrivateKey || keyPair.getPrivate() instanceof ECPrivateKey) && keyPair.getPublic() == null) {
+			throw new Exception("Invalid empty publicKey parameter");
 		}
 	}
 
@@ -637,31 +688,42 @@ public class SshKeyWriter {
 		return dataPadded;
 	}
 
-/**
- * writePuttyVersion2Key operation.
- * @param outputStream the outputStream value.
- * @param sshKey the sshKey value.
- * @param passwordChars the passwordChars value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Writes a key pair in PuTTY key format version 2 ("PuTTY-User-Key-File-2: ...", PuTTY 0.52 - 0.74 and newer).
+	 * <p>
+	 * When a password is given, the private key is encrypted with "aes256-cbc" and a SHA-1 based key derivation
+	 * without salt and work factor, so it offers only weak protection against brute force attacks.
+	 * Prefer {@link #writePuttyVersion3Key(OutputStream, SshKey, char[])} for password protected keys.
+	 * <p>
+	 * Password and comment are encoded in ISO-8859-1 (like PuTTY on Windows). If they contain characters, which are
+	 * not representable in ISO-8859-1, UTF-8 is used instead (like PuTTY on Linux).
+	 *
+	 * @param outputStream the stream receiving the encoded key
+	 * @param sshKey the SSH key to write, which must contain a private and a public key
+	 * @param passwordChars the optional password used to encrypt the private key, {@code null} or empty for no encryption
+	 * @throws Exception if the key cannot be encoded or written
+	 * @throws IllegalArgumentException if the comment contains linebreaks
+	 */
 	public static void writePuttyVersion2Key(final OutputStream outputStream, final SshKey sshKey, final char[] passwordChars) throws Exception {
 		final boolean encrypt = passwordChars != null && passwordChars.length > 0;
 		try (final Password password = new Password(copyPasswordForEncryption(passwordChars))) {
 			final Algorithm algorithm = sshKey.getAlgorithm();
-			final String comment = getPuttyComment(sshKey);
+			final byte[] commentBytes = getPuttyCommentBytes(sshKey);
 			final String encryptionType = encrypt ? "aes256-cbc" : "none";
 
 			final byte[] publicKeyBytes = KeyPairUtilities.getPublicKeyBytes(sshKey.getKeyPair().getPublic());
-			byte[] privateKeyBytes = getPuttyVersion2PrivateKeyBytes(sshKey.getKeyPair().getPrivate());
+			byte[] privateKeyBytes = getPuttyPrivateKeyBytes(sshKey.getKeyPair().getPrivate());
 
-			// padding up to multiple of 16 bytes for AES/CBC/NoPadding encryption
-			privateKeyBytes = addRandomPadding(privateKeyBytes, 16);
+			if (encrypt) {
+				// Padding up to multiple of 16 bytes for AES/CBC/NoPadding encryption (unencrypted keys are not padded by PuTTY)
+				privateKeyBytes = addRandomPadding(privateKeyBytes, 16);
+			}
 
-			final byte[] passwordBytes = encrypt ? password.getPasswordBytesIsoEncoded() : null;
+			final byte[] passwordBytes = encrypt ? getPuttyPasswordBytes(password, passwordChars) : null;
 			final byte[] macKey = SshKeyReader.getPuttyMacKeyVersion2(passwordBytes);
 			final String macHash;
 			try {
-				macHash = SshKeyReader.calculatePuttyMac(2, macKey, algorithm, encryptionType, comment.getBytes(StandardCharsets.ISO_8859_1), publicKeyBytes, privateKeyBytes);
+				macHash = SshKeyReader.calculatePuttyMac(2, macKey, algorithm, encryptionType, commentBytes, publicKeyBytes, privateKeyBytes);
 			} finally {
 				clear(macKey);
 			}
@@ -683,7 +745,8 @@ public class SshKeyWriter {
 			final StringBuilder content = new StringBuilder();
 			content.append("PuTTY-User-Key-File-2: ").append(algorithm.getSshAlgorithmId()).append("\r\n");
 			content.append("Encryption: ").append(encryptionType).append("\r\n");
-			content.append("Comment: ").append(comment).append("\r\n");
+			// The comment bytes are written unchanged, because the whole content is written in ISO-8859-1
+			content.append("Comment: ").append(new String(commentBytes, StandardCharsets.ISO_8859_1)).append("\r\n");
 			content.append("Public-Lines: ").append(getLineCount(publicKeyBase64)).append("\r\n");
 			content.append(publicKeyBase64).append("\r\n");
 			content.append("Private-Lines: ").append(getLineCount(privateKeyBase64)).append("\r\n");
@@ -696,16 +759,38 @@ public class SshKeyWriter {
 
 	/**
 	 * PuTTY stores the comment as single header line, which is part of the MAC checksum.
+	 * The comment is encoded in ISO-8859-1, or in UTF-8 if it contains characters not representable in ISO-8859-1.
 	 */
-	private static String getPuttyComment(final SshKey sshKey) {
+	private static byte[] getPuttyCommentBytes(final SshKey sshKey) {
 		final String comment = sshKey.getComment() == null ? "" : sshKey.getComment();
 		if (comment.indexOf('\r') >= 0 || comment.indexOf('\n') >= 0) {
 			throw new IllegalArgumentException("Linebreaks are not allowed in PuTTY key comments");
 		}
-		return comment;
+		return StandardCharsets.ISO_8859_1.newEncoder().canEncode(comment) ? comment.getBytes(StandardCharsets.ISO_8859_1) : comment.getBytes(StandardCharsets.UTF_8);
 	}
 
-	private static byte[] getPuttyVersion2PrivateKeyBytes(final PrivateKey privateKey) throws Exception {
+	/**
+	 * Returns the password bytes for PuTTY keys: ISO-8859-1 (PuTTY on Windows), or UTF-8 if the password contains characters not representable in ISO-8859-1.
+	 * Without this fallback, all such characters would be silently replaced by '?', which weakens the password.
+	 */
+	private static byte[] getPuttyPasswordBytes(final Password password, final char[] passwordChars) {
+		return isIsoEncodable(passwordChars) ? password.getPasswordBytesIsoEncoded() : password.getPasswordBytesUtfEncoded();
+	}
+
+	private static boolean isIsoEncodable(final char[] chars) {
+		return chars == null || StandardCharsets.ISO_8859_1.newEncoder().canEncode(CharBuffer.wrap(chars));
+	}
+
+	private static void checkIsoEncodable(final char[] chars, final String name) throws Exception {
+		if (!isIsoEncodable(chars)) {
+			throw new Exception("The " + name + " contains characters, which are not representable in ISO-8859-1");
+		}
+	}
+
+	/**
+	 * Returns the private key part of PuTTY keys (identical for version 2 and 3).
+	 */
+	private static byte[] getPuttyPrivateKeyBytes(final PrivateKey privateKey) throws Exception {
 		if (privateKey == null) {
 			throw new Exception("Invalid empty privateKey parameter");
 		} else {
@@ -733,32 +818,42 @@ public class SshKeyWriter {
 		}
 	}
 
-/**
- * writePuttyVersion3Key operation.
- * @param outputStream the outputStream value.
- * @param sshKey the sshKey value.
- * @param passwordChars the passwordChars value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Writes a key pair in PuTTY key format version 3 ("PuTTY-User-Key-File-3: ...", PuTTY 0.75 and newer).
+	 * <p>
+	 * When a password is given, the private key is encrypted with "aes256-cbc" and the key derivation function
+	 * Argon2id (8192 KiB memory, 21 passes, parallelism 1, random 16 byte salt).
+	 * <p>
+	 * Password and comment are encoded in ISO-8859-1 (like PuTTY on Windows). If they contain characters, which are
+	 * not representable in ISO-8859-1, UTF-8 is used instead (like PuTTY on Linux).
+	 *
+	 * @param outputStream the stream receiving the encoded key
+	 * @param sshKey the SSH key to write, which must contain a private and a public key
+	 * @param passwordChars the optional password used to encrypt the private key, {@code null} or empty for no encryption
+	 * @throws Exception if the key cannot be encoded or written
+	 * @throws IllegalArgumentException if the comment contains linebreaks
+	 */
 	public static void writePuttyVersion3Key(final OutputStream outputStream, final SshKey sshKey, final char[] passwordChars) throws Exception {
 		final boolean encrypt = passwordChars != null && passwordChars.length > 0;
 		try (final Password password = new Password(copyPasswordForEncryption(passwordChars))) {
 			final Algorithm algorithm = sshKey.getAlgorithm();
-			final String comment = getPuttyComment(sshKey);
-			final byte[] commentBytes = comment.getBytes(StandardCharsets.ISO_8859_1);
+			final byte[] commentBytes = getPuttyCommentBytes(sshKey);
 
 			final byte[] publicKeyBytes = KeyPairUtilities.getPublicKeyBytes(sshKey.getKeyPair().getPublic());
-			byte[] privateKeyBytes = getPuttyVersion3PrivateKeyBytes(sshKey.getKeyPair().getPrivate());
+			byte[] privateKeyBytes = getPuttyPrivateKeyBytes(sshKey.getKeyPair().getPrivate());
 
-			// padding up to multiple of 16 bytes for AES/CBC/NoPadding encryption
-			privateKeyBytes = addRandomPadding(privateKeyBytes, 16);
+			if (encrypt) {
+				// Padding up to multiple of 16 bytes for AES/CBC/NoPadding encryption (unencrypted keys are not padded by PuTTY)
+				privateKeyBytes = addRandomPadding(privateKeyBytes, 16);
+			}
 
 			final String publicKeyBase64 = toWrappedBase64(publicKeyBytes, 64, "\r\n");
 
 			final StringBuilder content = new StringBuilder();
 			content.append("PuTTY-User-Key-File-3: ").append(algorithm.getSshAlgorithmId()).append("\r\n");
 			content.append("Encryption: ").append(encrypt ? "aes256-cbc" : "none").append("\r\n");
-			content.append("Comment: ").append(comment).append("\r\n");
+			// The comment bytes are written unchanged, because the whole content is written in ISO-8859-1
+			content.append("Comment: ").append(new String(commentBytes, StandardCharsets.ISO_8859_1)).append("\r\n");
 			content.append("Public-Lines: ").append(getLineCount(publicKeyBase64)).append("\r\n");
 			content.append(publicKeyBase64).append("\r\n");
 
@@ -778,9 +873,11 @@ public class SshKeyWriter {
 				content.append("Argon2-Salt: ").append(toHexString(argon2Salt)).append("\r\n");
 
 				byte[] puttyKeyEncryptionKey = null;
+				byte[] macKey = null;
 				try {
-					puttyKeyEncryptionKey = SshKeyReader.deriveArgon2Key(password.getPasswordBytesIsoEncoded(), keyDerivation, argon2Memory, argon2Passes, argon2Parallelism, argon2Salt);
-					macHash = SshKeyReader.calculatePuttyMac(3, Arrays.copyOfRange(puttyKeyEncryptionKey, 48, 80), algorithm, "aes256-cbc", commentBytes, publicKeyBytes, privateKeyBytes);
+					puttyKeyEncryptionKey = SshKeyReader.deriveArgon2Key(getPuttyPasswordBytes(password, passwordChars), keyDerivation, argon2Memory, argon2Passes, argon2Parallelism, argon2Salt);
+					macKey = Arrays.copyOfRange(puttyKeyEncryptionKey, 48, 80);
+					macHash = SshKeyReader.calculatePuttyMac(3, macKey, algorithm, "aes256-cbc", commentBytes, publicKeyBytes, privateKeyBytes);
 
 					final Cipher cipher = Cipher.getInstance("AES/CBC/NoPadding");
 					cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(puttyKeyEncryptionKey, 0, 32, "AES"), new IvParameterSpec(puttyKeyEncryptionKey, 32, 16));
@@ -788,6 +885,7 @@ public class SshKeyWriter {
 					privateKeyBytes = cipher.doFinal(privateKeyBytes);
 				} finally {
 					clear(puttyKeyEncryptionKey);
+					clear(macKey);
 				}
 			} else {
 				macHash = SshKeyReader.calculatePuttyMac(3, new byte[0], algorithm, "none", commentBytes, publicKeyBytes, privateKeyBytes);
@@ -800,34 +898,6 @@ public class SshKeyWriter {
 			content.append("Private-MAC: ").append(macHash).append("\r\n");
 
 			outputStream.write(content.toString().getBytes(StandardCharsets.ISO_8859_1));
-		}
-	}
-
-	private static byte[] getPuttyVersion3PrivateKeyBytes(final PrivateKey privateKey) throws Exception {
-		if (privateKey == null) {
-			throw new Exception("Invalid empty privateKey parameter");
-		} else {
-			final BlockDataWriter privateKeyWriter = new BlockDataWriter();
-			if (privateKey instanceof RSAPrivateCrtKey) {
-				final RSAPrivateCrtKey privateKeyRSA = (RSAPrivateCrtKey) privateKey;
-				privateKeyWriter.writeBigInt(privateKeyRSA.getPrivateExponent());
-				privateKeyWriter.writeBigInt(privateKeyRSA.getPrimeP());
-				privateKeyWriter.writeBigInt(privateKeyRSA.getPrimeQ());
-				privateKeyWriter.writeBigInt(privateKeyRSA.getCrtCoefficient());
-			} else if (privateKey instanceof DSAPrivateKey) {
-				final DSAPrivateKey privateKeyDSA = (DSAPrivateKey) privateKey;
-				privateKeyWriter.writeBigInt(privateKeyDSA.getX());
-			} else if (privateKey instanceof ECPrivateKey) {
-				final ECPrivateKey privateKeyEC = (ECPrivateKey) privateKey;
-				privateKeyWriter.writeBigInt(privateKeyEC.getS());
-			} else if (privateKey instanceof EdECPrivateKey) {
-				final EdECPrivateKey privateKeyEdEC = (EdECPrivateKey) privateKey;
-				final byte[] privateKeyData = getEdDSAPrivateKeyBytes(privateKeyEdEC);
-				privateKeyWriter.writeData(privateKeyData);
-			} else {
-				throw new IllegalArgumentException("Unsupported SSH cipher algorithm");
-			}
-			return privateKeyWriter.toByteArray();
 		}
 	}
 

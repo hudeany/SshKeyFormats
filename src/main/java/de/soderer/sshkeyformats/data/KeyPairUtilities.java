@@ -1,7 +1,6 @@
 package de.soderer.sshkeyformats.data;
 
 import java.io.ByteArrayOutputStream;
-import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.math.BigInteger;
@@ -23,26 +22,29 @@ import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.ECParameterSpec;
-import java.util.Arrays;
 import java.util.Base64;
-import java.util.List;
-
-import de.soderer.sshkeyformats.data.Asn1Codec.DerTag;
+import java.util.Locale;
 
 /**
- * KeyPairUtilities API.
+ * Helper methods for creating key pairs, determining their SSH algorithm and key strength,
+ * encoding public keys in SSH wire format (RFC 4253 / RFC 5656 / RFC 8709) and calculating key fingerprints.
  */
 public class KeyPairUtilities {
+	private KeyPairUtilities() {
+		// Utility class, no instances
+	}
+
 	/**
-	 * Create a RSA keypair of given strength
-	 
-	 * @param keyStrength the RSA key size in bits
+	 * Creates a RSA key pair of the given strength.
+	 *
+	 * @param keyStrength the RSA key size in bits (at least 2048, recommended at least 3072)
 	 * @return the generated RSA key pair
-	 * @throws Exception if RSA key pair generation fails
+	 * @throws Exception if the key strength is below 2048 bits or RSA key pair generation fails
 	 */
 	public static KeyPair createRsaKeyPair(final int keyStrength) throws Exception {
-		if (keyStrength < 512) {
-			throw new Exception("Invalid RSA key strength: " + keyStrength);
+		if (keyStrength < 2048) {
+			// RSA keys below 2048 bit are considered insecure by current standards (NIST/BSI)
+			throw new Exception("Invalid RSA key strength (minimum 2048 bit required): " + keyStrength);
 		}
 		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
 		keyPairGenerator.initialize(keyStrength);
@@ -50,26 +52,32 @@ public class KeyPairUtilities {
 	}
 
 	/**
-	 * Create a DSA keypair of 1024 bit strength<br/>
-	 * Watchout: OpenSSH only supports 1024 bit DSA key strength<br/>
-	 
-	 * @return the generated 1024-bit DSA key pair
+	 * Creates a DSA key pair of 1024 bit strength.
+	 * <p>
+	 * Watch out: OpenSSH only supports 1024 bit DSA keys and has disabled DSA by default since version 7.0.
+	 *
+	 * @return the generated 1024 bit DSA key pair
 	 * @throws Exception if DSA key pair generation fails
+	 * @deprecated DSA-1024 is considered cryptographically weak by current standards (NIST/BSI).
+	 *             Use only for compatibility with legacy systems, never for new keys.
 	 */
+	@Deprecated
 	public static KeyPair createDsaKeyPair() throws Exception {
-		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("DSA");
-		keyPairGenerator.initialize(1024);
-		return keyPairGenerator.generateKeyPair();
+		return createDsaKeyPair(1024);
 	}
 
 	/**
-	 * Create a DSA keypair of given strength<br/>
-	 * Watchout: OpenSSH only supports 1024 bit DSA key strength<br/>
-	 
-	 * @param keyStrength the DSA key size in bits
+	 * Creates a DSA key pair of the given strength.
+	 * <p>
+	 * Watch out: OpenSSH only supports 1024 bit DSA keys and has disabled DSA by default since version 7.0.
+	 *
+	 * @param keyStrength the DSA key size in bits (as supported by the JDK, e.g. 1024, 2048 or 3072)
 	 * @return the generated DSA key pair
-	 * @throws Exception if DSA key pair generation fails
+	 * @throws Exception if the key strength is not supported or DSA key pair generation fails
+	 * @deprecated DSA is considered legacy and, at the 1024 bit strength required for OpenSSH, cryptographically weak (NIST/BSI).
+	 *             Use only for compatibility with legacy systems, never for new keys.
 	 */
+	@Deprecated
 	public static KeyPair createDsaKeyPair(final int keyStrength) throws Exception {
 		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("DSA");
 		keyPairGenerator.initialize(keyStrength);
@@ -77,21 +85,24 @@ public class KeyPairUtilities {
 	}
 
 	/**
-	 * Create a ECDSA keypair of eliptic curve name.
-	 * Supported eliptic curve names are
-	 *   nistp256 or secp256
-	 *   nistp384 or secp384
-	 *   nistp521 or secp521
-	 
+	 * Creates an ECDSA key pair for the given elliptic curve name.
+	 * <p>
+	 * Supported curve names (case insensitive):
+	 * <ul>
+	 * <li>"nistp256" or "secp256"</li>
+	 * <li>"nistp384" or "secp384"</li>
+	 * <li>"nistp521" or "secp521"</li>
+	 * </ul>
+	 *
 	 * @param ecdsaCurveName the ECDSA curve name
-	 * @return the generated elliptic-curve key pair
-	 * @throws Exception if the curve name is unsupported or key generation fails
+	 * @return the generated elliptic curve key pair
+	 * @throws Exception if the curve name is missing or unsupported or key generation fails
 	 */
 	public static KeyPair createEllipticCurveKeyPair(final String ecdsaCurveName) throws Exception {
 		if (ecdsaCurveName == null || "".equals(ecdsaCurveName.trim())) {
 			throw new Exception("Missing ECDSA curve name parameter");
 		}
-		final String curveName = ecdsaCurveName.toLowerCase().trim().replace("nist", "sec");
+		final String curveName = ecdsaCurveName.toLowerCase(Locale.ROOT).trim().replace("nist", "sec");
 		if (!"secp256".equals(curveName) && !"secp384".equals(curveName) && !"secp521".equals(curveName)) {
 			throw new Exception("Unknown ECDSA curve name: " + ecdsaCurveName);
 		}
@@ -103,50 +114,46 @@ public class KeyPairUtilities {
 		return keyPairGenerator.generateKeyPair();
 	}
 
-/**
- * createEllipticCurveKeyPair operation.
- * @param curveId the curveId value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Creates an ECDSA key pair for the NIST curve of the given size.
+	 *
+	 * @param curveId the curve size in bits: 256 (nistp256), 384 (nistp384) or 521 (nistp521)
+	 * @return the generated elliptic curve key pair
+	 * @throws Exception if the curve size is not supported or key generation fails
+	 */
 	public static KeyPair createEllipticCurveKeyPair(final int curveId) throws Exception {
 		if (256 != curveId && 384 != curveId && 521 != curveId) {
-			throw new Exception("Invalid ECDSA curve id parameter");
+			throw new Exception("Invalid ECDSA curve id parameter: " + curveId);
 		}
-		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("EC");
-		keyPairGenerator.initialize(curveId);
-		return keyPairGenerator.generateKeyPair();
-	}
-
-/**
- * createEd25519CurveKeyPair operation.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
-	public static KeyPair createEd25519CurveKeyPair() throws Exception {
-		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("Ed25519");
-		return keyPairGenerator.generateKeyPair();
-	}
-
-/**
- * createEd448CurveKeyPair operation.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
-	public static KeyPair createEd448CurveKeyPair() throws Exception {
-		final KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("Ed448");
-		return keyPairGenerator.generateKeyPair();
+		return createEllipticCurveKeyPair("nistp" + curveId);
 	}
 
 	/**
-	 * Key type<br />
-	 * "ssh-rsa" for RSA key<br />
-	 * "ssh-dss" for DSA key<br />
-	 * "ecdsa-sha2-nistp256" or "ecdsa-sha2-nistp384" or "ecdsa-sha2-nistp521" for ECDSA key<br />
-	 
+	 * Creates an EdDSA key pair on curve Ed25519.
+	 *
+	 * @return the generated Ed25519 key pair
+	 * @throws Exception if key generation fails
+	 */
+	public static KeyPair createEd25519CurveKeyPair() throws Exception {
+		return KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+	}
+
+	/**
+	 * Creates an EdDSA key pair on curve Ed448.
+	 *
+	 * @return the generated Ed448 key pair
+	 * @throws Exception if key generation fails
+	 */
+	public static KeyPair createEd448CurveKeyPair() throws Exception {
+		return KeyPairGenerator.getInstance("Ed448").generateKeyPair();
+	}
+
+	/**
+	 * Determines the SSH algorithm of a key pair, preferably by its private key.
+	 *
 	 * @param keyPair the key pair to inspect
-	 * @return the SSH algorithm represented by the key pair
-	 * @throws Exception if the key type is unsupported
+	 * @return the SSH algorithm represented by the key pair (e.g. {@link Algorithm#RSA} for "ssh-rsa")
+	 * @throws Exception if the key pair is empty or the key type is unsupported
 	 */
 	public static Algorithm getAlgorithm(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
@@ -161,17 +168,14 @@ public class KeyPairUtilities {
 	}
 
 	/**
-	 * Key type<br />
-	 * "ssh-rsa" for RSA key<br />
-	 * "ssh-dss" for DSA key<br />
-	 * "ecdsa-sha2-nistp256" or "ecdsa-sha2-nistp384" or "ecdsa-sha2-nistp521" for ECDSA key<br />
-	 
+	 * Determines the SSH algorithm of a public key.
+	 *
 	 * @param publicKey the public key to inspect
-	 * @return the SSH algorithm represented by the public key
-	 * @throws Exception if the key type is unsupported
+	 * @return the SSH algorithm represented by the public key (e.g. {@link Algorithm#NISTP256} for "ecdsa-sha2-nistp256")
+	 * @throws Exception if the key is {@code null} or its type or curve is unsupported
 	 */
 	public static Algorithm getAlgorithm(final PublicKey publicKey) throws Exception {
-		if (publicKey == null){
+		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
 		} else if (publicKey instanceof RSAPublicKey) {
 			return Algorithm.RSA;
@@ -186,7 +190,30 @@ public class KeyPairUtilities {
 		}
 	}
 
-	private static Algorithm getEcAlgorithm(final String nistCurveName) {
+	/**
+	 * Determines the SSH algorithm of a private key.
+	 *
+	 * @param privateKey the private key to inspect
+	 * @return the SSH algorithm represented by the private key (e.g. {@link Algorithm#ED25519} for "ssh-ed25519")
+	 * @throws Exception if the key is {@code null} or its type or curve is unsupported
+	 */
+	public static Algorithm getAlgorithm(final PrivateKey privateKey) throws Exception {
+		if (privateKey == null) {
+			throw new Exception("Invalid empty privateKey parameter");
+		} else if (privateKey instanceof RSAPrivateKey) {
+			return Algorithm.RSA;
+		} else if (privateKey instanceof DSAPrivateKey) {
+			return Algorithm.DSA;
+		} else if (privateKey instanceof ECPrivateKey) {
+			return getEcAlgorithm(CryptographicUtilities.getEcDsaEllipticCurveName((ECPrivateKey) privateKey));
+		} else if (privateKey instanceof EdECPrivateKey) {
+			return getEdDsaAlgorithm(((EdECPrivateKey) privateKey).getParams().getName());
+		} else {
+			throw new Exception("Unsupported private key algorithm: " + privateKey.getAlgorithm());
+		}
+	}
+
+	private static Algorithm getEcAlgorithm(final String nistCurveName) throws Exception {
 		if ("nistp256".equalsIgnoreCase(nistCurveName)) {
 			return Algorithm.NISTP256;
 		} else if ("nistp384".equalsIgnoreCase(nistCurveName)) {
@@ -194,7 +221,7 @@ public class KeyPairUtilities {
 		} else if ("nistp521".equalsIgnoreCase(nistCurveName)) {
 			return Algorithm.NISTP521;
 		} else {
-			throw new IllegalArgumentException("Unknown NIST key cipher: " + nistCurveName);
+			throw new Exception("Unsupported ECDSA curve: " + nistCurveName);
 		}
 	}
 
@@ -209,37 +236,12 @@ public class KeyPairUtilities {
 	}
 
 	/**
-	 * Key type<br />
-	 * "ssh-rsa" for RSA key<br />
-	 * "ssh-dss" for DSA key<br />
-	 * "ecdsa-sha2-nistp256" or "ecdsa-sha2-nistp384" or "ecdsa-sha2-nistp521" for ECDSA key<br />
-	 
-	 * @param privateKey the private key to inspect
-	 * @return the SSH algorithm represented by the private key
-	 * @throws Exception if the key type is unsupported
+	 * Returns the key strength in bits (RSA: modulus size, DSA: size of prime p, EC: curve size).
+	 *
+	 * @param keyPair the key pair to inspect, the public key is preferred if available
+	 * @return the key strength in bits
+	 * @throws Exception if the key pair is empty or the key type is unsupported
 	 */
-	public static Algorithm getAlgorithm(final PrivateKey privateKey) throws Exception {
-		if (privateKey == null){
-			throw new Exception("Invalid empty privateKey parameter");
-		} else if (privateKey instanceof RSAPrivateKey) {
-			return Algorithm.RSA;
-		} else if (privateKey instanceof DSAPrivateKey) {
-			return Algorithm.DSA;
-		} else if (privateKey instanceof ECPrivateKey) {
-			return getEcAlgorithm(CryptographicUtilities.getEcDsaEllipticCurveName((ECPrivateKey) privateKey));
-		} else if (privateKey instanceof EdECPrivateKey) {
-			return getEdDsaAlgorithm(((EdECPrivateKey) privateKey).getParams().getName());
-		} else {
-			throw new IllegalArgumentException("Unknown private key cipher: " + privateKey.getAlgorithm());
-		}
-	}
-
-/**
- * getKeyStrength operation.
- * @param keyPair the keyPair value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
 	public static int getKeyStrength(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -260,12 +262,13 @@ public class KeyPairUtilities {
 		}
 	}
 
-/**
- * getKeyStrength operation.
- * @param publicKey the publicKey value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Returns the key strength in bits (RSA: modulus size, DSA: size of prime p, EC: curve size).
+	 *
+	 * @param publicKey the public key to inspect
+	 * @return the key strength in bits
+	 * @throws Exception if the key is {@code null} or the key type is unsupported
+	 */
 	public static int getKeyStrength(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
@@ -298,402 +301,294 @@ public class KeyPairUtilities {
 		}
 	}
 
-/**
- * getPublicKeyBytes operation.
- * @param publicKey the publicKey value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Encodes a public key in SSH wire format (RFC 4253 / RFC 5656 / RFC 8709),
+	 * as used in authorized_keys files, RFC 4716 files and for fingerprints.
+	 *
+	 * @param publicKey the public key to encode
+	 * @return the SSH wire format key blob
+	 * @throws Exception if the key is {@code null} or its type is unsupported
+	 */
 	public static byte[] getPublicKeyBytes(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
-		} else {
-			final Algorithm algorithm = getAlgorithm(publicKey);
-			final BlockDataWriter publicKeyWriter = new BlockDataWriter();
-			if (publicKey instanceof RSAPublicKey) {
-				final RSAPublicKey publicKeyRSA = (RSAPublicKey) publicKey;
-				publicKeyWriter.writeString(algorithm.getSshAlgorithmId());
-				publicKeyWriter.writeBigInt(publicKeyRSA.getPublicExponent());
-				publicKeyWriter.writeBigInt(publicKeyRSA.getModulus());
-				return publicKeyWriter.toByteArray();
-			} else if (publicKey instanceof DSAPublicKey) {
-				final DSAPublicKey publicKeyDSA = (DSAPublicKey) publicKey;
-				publicKeyWriter.writeString(algorithm.getSshAlgorithmId());
-				publicKeyWriter.writeBigInt(publicKeyDSA.getParams().getP());
-				publicKeyWriter.writeBigInt(publicKeyDSA.getParams().getQ());
-				publicKeyWriter.writeBigInt(publicKeyDSA.getParams().getG());
-				publicKeyWriter.writeBigInt(publicKeyDSA.getY());
-			} else if (publicKey instanceof ECPublicKey) {
-				final ECPublicKey publicKeyEC = (ECPublicKey) publicKey;
-				final String ecCurveName = CryptographicUtilities.getEcDsaEllipticCurveName(publicKeyEC);
-				publicKeyWriter.writeString(algorithm.getSshAlgorithmId());
-				publicKeyWriter.writeString(ecCurveName);
-
-				final DerTag enclosingDerTag = Asn1Codec.readDerTag(publicKeyEC.getEncoded());
-				if (Asn1Codec.DER_TAG_SEQUENCE != enclosingDerTag.getTagId()) {
-					throw new Exception("Invalid key data found");
-				}
-				final List<DerTag> derDataTags = Asn1Codec.readDerTags(enclosingDerTag.getData());
-				if (Asn1Codec.DER_TAG_SEQUENCE != derDataTags.get(0).getTagId()) {
-					throw new Exception("Invalid key data found");
-				}
-				final List<DerTag> sshAlgorithmDerTags = Asn1Codec.readDerTags(derDataTags.get(0).getData());
-				final OID ecDsaPublicKeyOid = new OID(sshAlgorithmDerTags.get(0).getData());
-				if (OID.ECDSA_PUBLICKEY.matches(ecDsaPublicKeyOid.getByteArrayEncoding())) {
-					final OID ecDsaCurveOid = new OID(sshAlgorithmDerTags.get(1).getData());
-					if (OID.ECDSA_CURVE_NISTP256.matches(ecDsaCurveOid.getByteArrayEncoding())
-							|| OID.ECDSA_CURVE_NISTP384.matches(ecDsaCurveOid.getByteArrayEncoding())
-							|| OID.ECDSA_CURVE_NISTP521.matches(ecDsaCurveOid.getByteArrayEncoding())) {
-						if (Asn1Codec.DER_TAG_BIT_STRING != derDataTags.get(1).getTagId()) {
-							throw new Exception("Invalid key data found");
-						} else {
-							// remove first byte (odd sign)
-							final byte[] dataWithLeadingZero = derDataTags.get(1).getData();
-							final byte[] qBytes = Arrays.copyOfRange(dataWithLeadingZero, 1, dataWithLeadingZero.length);
-							publicKeyWriter.writeData(qBytes);
-						}
-					} else {
-						throw new Exception("Unknown SSH EcDSA curve OID: " + ecDsaCurveOid.getStringEncoding());
-					}
-				} else {
-					throw new Exception("Unknown SSH EcDSA public key OID: " + ecDsaPublicKeyOid.getStringEncoding());
-				}
-			} else if (publicKey instanceof EdECPublicKey) {
-				final EdECPublicKey publicKeyEdEC = (EdECPublicKey) publicKey;
-				int publicKeyDataLength;
-				if ("Ed25519".equalsIgnoreCase(publicKeyEdEC.getParams().getName())) {
-					publicKeyWriter.writeString(algorithm.getSshAlgorithmId());
-					publicKeyDataLength = 32;
-				} else if ("Ed448".equalsIgnoreCase(publicKeyEdEC.getParams().getName())) {
-					publicKeyWriter.writeString(algorithm.getSshAlgorithmId());
-					publicKeyDataLength = 57;
-				} else {
-					throw new Exception("Unknown EdDSA type: " + publicKeyEdEC.getParams().getName());
-				}
-
-				final byte[] javaEncoding = publicKeyEdEC.getEncoded();
-				final byte[] publicKeyData = new byte[publicKeyDataLength];
-				System.arraycopy(javaEncoding, javaEncoding.length - publicKeyDataLength, publicKeyData, 0, publicKeyDataLength);
-				publicKeyWriter.writeData(publicKeyData);
-			} else {
-				throw new Exception("Unsupported algorithm name: " + algorithm.name());
-			}
-			return publicKeyWriter.toByteArray();
 		}
+
+		final Algorithm algorithm = getAlgorithm(publicKey);
+		final BlockDataWriter publicKeyWriter = new BlockDataWriter();
+		publicKeyWriter.writeString(algorithm.getSshAlgorithmId());
+		if (publicKey instanceof RSAPublicKey) {
+			final RSAPublicKey publicKeyRSA = (RSAPublicKey) publicKey;
+			publicKeyWriter.writeBigInt(publicKeyRSA.getPublicExponent());
+			publicKeyWriter.writeBigInt(publicKeyRSA.getModulus());
+		} else if (publicKey instanceof DSAPublicKey) {
+			final DSAPublicKey publicKeyDSA = (DSAPublicKey) publicKey;
+			publicKeyWriter.writeBigInt(publicKeyDSA.getParams().getP());
+			publicKeyWriter.writeBigInt(publicKeyDSA.getParams().getQ());
+			publicKeyWriter.writeBigInt(publicKeyDSA.getParams().getG());
+			publicKeyWriter.writeBigInt(publicKeyDSA.getY());
+		} else if (publicKey instanceof ECPublicKey) {
+			final ECPublicKey publicKeyEC = (ECPublicKey) publicKey;
+			publicKeyWriter.writeString(CryptographicUtilities.getEcDsaEllipticCurveName(publicKeyEC));
+			publicKeyWriter.writeData(getUncompressedEcPoint(publicKeyEC));
+		} else if (publicKey instanceof EdECPublicKey) {
+			final int publicKeyDataLength = Algorithm.ED25519 == algorithm ? 32 : 57;
+			// The X.509 encoding ends with the raw public key (RFC 8410)
+			final byte[] javaEncoding = publicKey.getEncoded();
+			final byte[] publicKeyData = new byte[publicKeyDataLength];
+			System.arraycopy(javaEncoding, javaEncoding.length - publicKeyDataLength, publicKeyData, 0, publicKeyDataLength);
+			publicKeyWriter.writeData(publicKeyData);
+		} else {
+			throw new Exception("Unsupported algorithm name: " + algorithm.name());
+		}
+		return publicKeyWriter.toByteArray();
 	}
 
-/**
- * getMd5Fingerprint operation.
- * @param keyPair the keyPair value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Returns the uncompressed point encoding (0x04 | X | Y, SEC1) of an EC public key with fixed length coordinates.
+	 */
+	private static byte[] getUncompressedEcPoint(final ECPublicKey publicKeyEC) {
+		final int coordinateLength = (publicKeyEC.getParams().getCurve().getField().getFieldSize() + 7) / 8;
+		final byte[] point = new byte[1 + 2 * coordinateLength];
+		point[0] = 0x04;
+		copyUnsignedFixedLength(publicKeyEC.getW().getAffineX(), point, 1, coordinateLength);
+		copyUnsignedFixedLength(publicKeyEC.getW().getAffineY(), point, 1 + coordinateLength, coordinateLength);
+		return point;
+	}
+
+	private static void copyUnsignedFixedLength(final BigInteger value, final byte[] target, final int targetOffset, final int length) {
+		final byte[] source = value.toByteArray();
+		// Skip the leading sign byte of BigInteger encoding
+		final int copyLength = Math.min(source.length, length);
+		System.arraycopy(source, source.length - copyLength, target, targetOffset + length - copyLength, copyLength);
+	}
+
+	/**
+	 * Calculates the MD5 fingerprint of the public key of a key pair (as shown by "ssh-keygen -l -E md5", but in uppercase hex, e.g. "0A:1B:...").
+	 *
+	 * @param keyPair the key pair, which must contain a public key
+	 * @return the uppercase colon separated hexadecimal MD5 fingerprint
+	 * @throws Exception if the key pair or its public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getMd5Fingerprint(final KeyPair keyPair) throws Exception {
-		if (keyPair == null) {
-			throw new Exception("Invalid empty keyPair parameter");
-		} else {
-			return getMd5Fingerprint(keyPair.getPublic());
-		}
+		return getMd5Fingerprint(getPublicKey(keyPair));
 	}
 
-/**
- * getMd5Fingerprint operation.
- * @param publicKey the publicKey value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the MD5 fingerprint of a public key (as shown by "ssh-keygen -l -E md5", but in uppercase hex, e.g. "0A:1B:...").
+	 *
+	 * @param publicKey the public key
+	 * @return the uppercase colon separated hexadecimal MD5 fingerprint
+	 * @throws Exception if the public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getMd5Fingerprint(final PublicKey publicKey) throws Exception {
-		if (publicKey == null) {
-			throw new Exception("Invalid empty publicKey parameter");
-		} else {
-			try {
-				final MessageDigest md = MessageDigest.getInstance("MD5");
-				md.update(getPublicKeyBytes(publicKey));
-				return BitUtilities.toHexString(md.digest(), ":").toUpperCase();
-			} catch (final Exception e) {
-				throw new Exception("Cannot create MD5 fingerprint", e);
-			}
-		}
+		return BitUtilities.toHexString(getFingerprintBytes(publicKey, "MD5"), ":").toUpperCase(Locale.ROOT);
 	}
 
-/**
- * getSha1Fingerprint operation.
- * @param keyPair the keyPair value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-1 fingerprint of the public key of a key pair as lowercase colon separated hexadecimal string.
+	 *
+	 * @param keyPair the key pair, which must contain a public key
+	 * @return the lowercase colon separated hexadecimal SHA-1 fingerprint
+	 * @throws Exception if the key pair or its public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha1Fingerprint(final KeyPair keyPair) throws Exception {
-		if (keyPair == null) {
-			throw new Exception("Invalid empty keyPair parameter");
-		} else {
-			return getSha1Fingerprint(keyPair.getPublic());
-		}
+		return getSha1Fingerprint(getPublicKey(keyPair));
 	}
 
-/**
- * getSha1Fingerprint operation.
- * @param publicKey the publicKey value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-1 fingerprint of a public key as lowercase colon separated hexadecimal string.
+	 *
+	 * @param publicKey the public key
+	 * @return the lowercase colon separated hexadecimal SHA-1 fingerprint
+	 * @throws Exception if the public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha1Fingerprint(final PublicKey publicKey) throws Exception {
-		if (publicKey == null) {
-			throw new Exception("Invalid empty publicKey parameter");
-		} else {
-			try {
-				final MessageDigest md = MessageDigest.getInstance("SHA-1");
-				md.update(getPublicKeyBytes(publicKey));
-				return BitUtilities.toHexString(md.digest(), ":");
-			} catch (final Exception e) {
-				throw new Exception("Cannot create SHA1 fingerprint", e);
-			}
-		}
+		return BitUtilities.toHexString(getFingerprintBytes(publicKey, "SHA-1"), ":");
 	}
 
-/**
- * getSha1FingerprintBase64 operation.
- * @param keyPair the keyPair value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-1 fingerprint of the public key of a key pair as unpadded Base64 string (as shown by "ssh-keygen -l -E sha1" without prefix "SHA1:").
+	 *
+	 * @param keyPair the key pair, which must contain a public key
+	 * @return the Base64 encoded SHA-1 fingerprint without padding
+	 * @throws Exception if the key pair or its public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha1FingerprintBase64(final KeyPair keyPair) throws Exception {
-		if (keyPair == null) {
-			throw new Exception("Invalid empty keyPair parameter");
-		} else {
-			return getSha1FingerprintBase64(keyPair.getPublic());
-		}
+		return getSha1FingerprintBase64(getPublicKey(keyPair));
 	}
 
-/**
- * getSha1FingerprintBase64 operation.
- * @param publicKey the publicKey value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-1 fingerprint of a public key as unpadded Base64 string (as shown by "ssh-keygen -l -E sha1" without prefix "SHA1:").
+	 *
+	 * @param publicKey the public key
+	 * @return the Base64 encoded SHA-1 fingerprint without padding
+	 * @throws Exception if the public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha1FingerprintBase64(final PublicKey publicKey) throws Exception {
-		if (publicKey == null) {
-			throw new Exception("Invalid empty publicKey parameter");
-		} else {
-			try {
-				final MessageDigest md = MessageDigest.getInstance("SHA-1");
-				md.update(getPublicKeyBytes(publicKey));
-				return Base64.getEncoder().encodeToString(md.digest());
-			} catch (final Exception e) {
-				throw new Exception("Cannot create SHA1 fingerprint", e);
-			}
-		}
+		return Base64.getEncoder().withoutPadding().encodeToString(getFingerprintBytes(publicKey, "SHA-1"));
 	}
 
-/**
- * getSha256Fingerprint operation.
- * @param keyPair the keyPair value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-256 fingerprint of the public key of a key pair as lowercase colon separated hexadecimal string.
+	 *
+	 * @param keyPair the key pair, which must contain a public key
+	 * @return the lowercase colon separated hexadecimal SHA-256 fingerprint
+	 * @throws Exception if the key pair or its public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha256Fingerprint(final KeyPair keyPair) throws Exception {
-		if (keyPair == null) {
-			throw new Exception("Invalid empty keyPair parameter");
-		} else {
-			return getSha256Fingerprint(keyPair.getPublic());
-		}
+		return getSha256Fingerprint(getPublicKey(keyPair));
 	}
 
-/**
- * getSha256Fingerprint operation.
- * @param publicKey the publicKey value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-256 fingerprint of a public key as lowercase colon separated hexadecimal string.
+	 *
+	 * @param publicKey the public key
+	 * @return the lowercase colon separated hexadecimal SHA-256 fingerprint
+	 * @throws Exception if the public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha256Fingerprint(final PublicKey publicKey) throws Exception {
-		if (publicKey == null) {
-			throw new Exception("Invalid empty publicKey parameter");
-		} else {
-			try {
-				final MessageDigest md = MessageDigest.getInstance("SHA-256");
-				md.update(getPublicKeyBytes(publicKey));
-				return BitUtilities.toHexString(md.digest(), ":");
-			} catch (final Exception e) {
-				throw new Exception("Cannot create SHA256 fingerprint", e);
-			}
-		}
+		return BitUtilities.toHexString(getFingerprintBytes(publicKey, "SHA-256"), ":");
 	}
 
-/**
- * getSha256FingerprintBase64 operation.
- * @param keyPair the keyPair value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-256 fingerprint of the public key of a key pair as unpadded Base64 string (as shown by "ssh-keygen -l" without prefix "SHA256:").
+	 *
+	 * @param keyPair the key pair, which must contain a public key
+	 * @return the Base64 encoded SHA-256 fingerprint without padding
+	 * @throws Exception if the key pair or its public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha256FingerprintBase64(final KeyPair keyPair) throws Exception {
-		if (keyPair == null) {
-			throw new Exception("Invalid empty keyPair parameter");
-		} else {
-			return getSha256FingerprintBase64(keyPair.getPublic());
-		}
+		return getSha256FingerprintBase64(getPublicKey(keyPair));
 	}
 
-/**
- * getSha256FingerprintBase64 operation.
- * @param publicKey the publicKey value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-256 fingerprint of a public key as unpadded Base64 string (as shown by "ssh-keygen -l" without prefix "SHA256:").
+	 *
+	 * @param publicKey the public key
+	 * @return the Base64 encoded SHA-256 fingerprint without padding
+	 * @throws Exception if the public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha256FingerprintBase64(final PublicKey publicKey) throws Exception {
-		if (publicKey == null) {
-			throw new Exception("Invalid empty publicKey parameter");
-		} else {
-			try {
-				final MessageDigest md = MessageDigest.getInstance("SHA-256");
-				md.update(getPublicKeyBytes(publicKey));
-				return Base64.getEncoder().encodeToString(md.digest());
-			} catch (final Exception e) {
-				throw new Exception("Cannot create SHA256 fingerprint", e);
-			}
-		}
+		return Base64.getEncoder().withoutPadding().encodeToString(getFingerprintBytes(publicKey, "SHA-256"));
 	}
 
-/**
- * getSha384Fingerprint operation.
- * @param keyPair the keyPair value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-384 fingerprint of the public key of a key pair as lowercase colon separated hexadecimal string.
+	 *
+	 * @param keyPair the key pair, which must contain a public key
+	 * @return the lowercase colon separated hexadecimal SHA-384 fingerprint
+	 * @throws Exception if the key pair or its public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha384Fingerprint(final KeyPair keyPair) throws Exception {
-		if (keyPair == null) {
-			throw new Exception("Invalid empty keyPair parameter");
-		} else {
-			return getSha384Fingerprint(keyPair.getPublic());
-		}
+		return getSha384Fingerprint(getPublicKey(keyPair));
 	}
 
-/**
- * getSha384Fingerprint operation.
- * @param publicKey the publicKey value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-384 fingerprint of a public key as lowercase colon separated hexadecimal string.
+	 *
+	 * @param publicKey the public key
+	 * @return the lowercase colon separated hexadecimal SHA-384 fingerprint
+	 * @throws Exception if the public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha384Fingerprint(final PublicKey publicKey) throws Exception {
-		if (publicKey == null) {
-			throw new Exception("Invalid empty publicKey parameter");
-		} else {
-			try {
-				final MessageDigest md = MessageDigest.getInstance("SHA-384");
-				md.update(getPublicKeyBytes(publicKey));
-				return BitUtilities.toHexString(md.digest(), ":");
-			} catch (final Exception e) {
-				throw new Exception("Cannot create SHA384 fingerprint", e);
-			}
-		}
+		return BitUtilities.toHexString(getFingerprintBytes(publicKey, "SHA-384"), ":");
 	}
 
-/**
- * getSha384FingerprintBase64 operation.
- * @param keyPair the keyPair value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-384 fingerprint of the public key of a key pair as unpadded Base64 string (as shown by "ssh-keygen -l -E sha384" without prefix "SHA384:").
+	 *
+	 * @param keyPair the key pair, which must contain a public key
+	 * @return the Base64 encoded SHA-384 fingerprint without padding
+	 * @throws Exception if the key pair or its public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha384FingerprintBase64(final KeyPair keyPair) throws Exception {
-		if (keyPair == null) {
-			throw new Exception("Invalid empty keyPair parameter");
-		} else {
-			return getSha384FingerprintBase64(keyPair.getPublic());
-		}
+		return getSha384FingerprintBase64(getPublicKey(keyPair));
 	}
 
-/**
- * getSha384FingerprintBase64 operation.
- * @param publicKey the publicKey value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-384 fingerprint of a public key as unpadded Base64 string (as shown by "ssh-keygen -l -E sha384" without prefix "SHA384:").
+	 *
+	 * @param publicKey the public key
+	 * @return the Base64 encoded SHA-384 fingerprint without padding
+	 * @throws Exception if the public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha384FingerprintBase64(final PublicKey publicKey) throws Exception {
-		if (publicKey == null) {
-			throw new Exception("Invalid empty publicKey parameter");
-		} else {
-			try {
-				final MessageDigest md = MessageDigest.getInstance("SHA-384");
-				md.update(getPublicKeyBytes(publicKey));
-				return Base64.getEncoder().encodeToString(md.digest());
-			} catch (final Exception e) {
-				throw new Exception("Cannot create SHA384 fingerprint", e);
-			}
-		}
+		return Base64.getEncoder().withoutPadding().encodeToString(getFingerprintBytes(publicKey, "SHA-384"));
 	}
 
-/**
- * getSha512Fingerprint operation.
- * @param keyPair the keyPair value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-512 fingerprint of the public key of a key pair as lowercase colon separated hexadecimal string.
+	 *
+	 * @param keyPair the key pair, which must contain a public key
+	 * @return the lowercase colon separated hexadecimal SHA-512 fingerprint
+	 * @throws Exception if the key pair or its public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha512Fingerprint(final KeyPair keyPair) throws Exception {
-		if (keyPair == null) {
-			throw new Exception("Invalid empty keyPair parameter");
-		} else {
-			return getSha512Fingerprint(keyPair.getPublic());
-		}
+		return getSha512Fingerprint(getPublicKey(keyPair));
 	}
 
-/**
- * getSha512Fingerprint operation.
- * @param publicKey the publicKey value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-512 fingerprint of a public key as lowercase colon separated hexadecimal string.
+	 *
+	 * @param publicKey the public key
+	 * @return the lowercase colon separated hexadecimal SHA-512 fingerprint
+	 * @throws Exception if the public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha512Fingerprint(final PublicKey publicKey) throws Exception {
-		if (publicKey == null) {
-			throw new Exception("Invalid empty publicKey parameter");
-		} else {
-			try {
-				final MessageDigest md = MessageDigest.getInstance("SHA-512");
-				md.update(getPublicKeyBytes(publicKey));
-				return BitUtilities.toHexString(md.digest(), ":");
-			} catch (final Exception e) {
-				throw new Exception("Cannot create SHA512 fingerprint", e);
-			}
-		}
+		return BitUtilities.toHexString(getFingerprintBytes(publicKey, "SHA-512"), ":");
 	}
 
-/**
- * getSha512FingerprintBase64 operation.
- * @param keyPair the keyPair value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Calculates the SHA-512 fingerprint of the public key of a key pair as unpadded Base64 string (as shown by "ssh-keygen -l -E sha512" without prefix "SHA512:").
+	 *
+	 * @param keyPair the key pair, which must contain a public key
+	 * @return the Base64 encoded SHA-512 fingerprint without padding
+	 * @throws Exception if the key pair or its public key is missing or the fingerprint cannot be calculated
+	 */
 	public static String getSha512FingerprintBase64(final KeyPair keyPair) throws Exception {
+		return getSha512FingerprintBase64(getPublicKey(keyPair));
+	}
+
+	/**
+	 * Calculates the SHA-512 fingerprint of a public key as unpadded Base64 string (as shown by "ssh-keygen -l -E sha512" without prefix "SHA512:").
+	 *
+	 * @param publicKey the public key
+	 * @return the Base64 encoded SHA-512 fingerprint without padding
+	 * @throws Exception if the public key is missing or the fingerprint cannot be calculated
+	 */
+	public static String getSha512FingerprintBase64(final PublicKey publicKey) throws Exception {
+		return Base64.getEncoder().withoutPadding().encodeToString(getFingerprintBytes(publicKey, "SHA-512"));
+	}
+
+	private static PublicKey getPublicKey(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
+		} else if (keyPair.getPublic() == null) {
+			throw new Exception("Missing public key in keyPair");
 		} else {
-			return getSha512FingerprintBase64(keyPair.getPublic());
+			return keyPair.getPublic();
 		}
 	}
 
-/**
- * getSha512FingerprintBase64 operation.
- * @param publicKey the publicKey value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
-	public static String getSha512FingerprintBase64(final PublicKey publicKey) throws Exception {
+	private static byte[] getFingerprintBytes(final PublicKey publicKey, final String digestAlgorithm) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
-		} else {
-			try {
-				final MessageDigest md = MessageDigest.getInstance("SHA-512");
-				md.update(getPublicKeyBytes(publicKey));
-				return Base64.getEncoder().encodeToString(md.digest());
-			} catch (final Exception e) {
-				throw new Exception("Cannot create SHA512 fingerprint", e);
-			}
+		}
+		try {
+			return MessageDigest.getInstance(digestAlgorithm).digest(getPublicKeyBytes(publicKey));
+		} catch (final Exception e) {
+			throw new Exception("Cannot create " + digestAlgorithm + " fingerprint", e);
 		}
 	}
 
-/**
- * encodePublicKeyForAuthorizedKeys operation.
- * @param keyPair the keyPair value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Encodes the public key of a key pair as authorized_keys entry without options and comment (e.g. "ssh-ed25519 AAAAC3...").
+	 *
+	 * @param keyPair the key pair, which must contain a public key
+	 * @return the key type followed by a blank and the Base64 encoded SSH wire format public key
+	 * @throws Exception if the key pair or its public key is missing or the key type is unsupported
+	 */
 	public static String encodePublicKeyForAuthorizedKeys(final KeyPair keyPair) throws Exception {
 		if (keyPair == null) {
 			throw new Exception("Invalid empty keyPair parameter");
@@ -704,28 +599,27 @@ public class KeyPairUtilities {
 		}
 	}
 
-/**
- * encodePublicKeyForAuthorizedKeys operation.
- * @param publicKey the publicKey value.
- * @return the resulting value.
- * @throws Exception if the operation cannot be completed.
- */
+	/**
+	 * Encodes a public key as authorized_keys entry without options and comment (e.g. "ssh-ed25519 AAAAC3...").
+	 *
+	 * @param publicKey the public key
+	 * @return the key type followed by a blank and the Base64 encoded SSH wire format public key
+	 * @throws Exception if the key is missing or its type is unsupported
+	 */
 	public static String encodePublicKeyForAuthorizedKeys(final PublicKey publicKey) throws Exception {
 		if (publicKey == null) {
 			throw new Exception("Invalid empty publicKey parameter");
 		} else {
-			return getAlgorithm(publicKey).getSshAlgorithmId() + " " + new String(Base64.getEncoder().encode(getPublicKeyBytes(publicKey)));
+			return getAlgorithm(publicKey).getSshAlgorithmId() + " " + Base64.getEncoder().encodeToString(getPublicKeyBytes(publicKey));
 		}
 	}
 
+	/**
+	 * Writer for SSH wire format data (RFC 4251: string, mpint).
+	 */
 	private static class BlockDataWriter {
-		private final ByteArrayOutputStream outputStream;
-		private final DataOutput keyDataOutput;
-
-		private BlockDataWriter() {
-			outputStream = new ByteArrayOutputStream();
-			keyDataOutput = new DataOutputStream(outputStream);
-		}
+		private final ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+		private final DataOutputStream keyDataOutput = new DataOutputStream(outputStream);
 
 		private void writeBigInt(final BigInteger bigIntegerData) throws Exception {
 			writeData(bigIntegerData.toByteArray());
@@ -735,12 +629,11 @@ public class KeyPairUtilities {
 			writeData(stringData.getBytes(StandardCharsets.ISO_8859_1));
 		}
 
-		private void writeData(final byte[] data) throws IOException, Exception {
+		private void writeData(final byte[] data) throws Exception {
+			if (data.length == 0) {
+				throw new Exception("Key blocksize error");
+			}
 			try {
-				if (data.length <= 0) {
-					throw new Exception("Key blocksize error");
-				}
-
 				keyDataOutput.writeInt(data.length);
 				keyDataOutput.write(data);
 			} catch (final IOException e) {

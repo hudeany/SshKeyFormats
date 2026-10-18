@@ -1,17 +1,21 @@
 package de.soderer.sshkeyformats.data;
 
 import java.security.MessageDigest;
+import java.util.Arrays;
 
 /**
- * OpenSSH "bcrypt" cipher for PBKDF (Password-Based Key Derivation Function)
- * based on "Blowfish" algorithm
+ * OpenSSH "bcrypt_pbkdf" password-based key derivation function (PBKDF) based on the "Blowfish" cipher,
+ * as used for encrypted private keys in OpenSSH v1 format ("-----BEGIN OPENSSH PRIVATE KEY-----").
+ * <p>
+ * Instances are not thread-safe, because the Blowfish state is kept in instance fields.
+ * Use a separate instance per thread or derivation.
  */
 public class BCryptPBKDF {
-	private static final int P_INITIAL[] = { 0x243f6a88, 0x85a308d3, 0x13198a2e, 0x03707344, 0xa4093822, 0x299f31d0,
+	private static final int[] P_INITIAL = { 0x243f6a88, 0x85a308d3, 0x13198a2e, 0x03707344, 0xa4093822, 0x299f31d0,
 			0x082efa98, 0xec4e6c89, 0x452821e6, 0x38d01377, 0xbe5466cf, 0x34e90c6c, 0xc0ac29b7, 0xc97c50dd, 0x3f84d5b5,
 			0xb5470917, 0x9216d5d9, 0x8979fb1b };
 
-	private static final int S_INITIAL[] = { 0xd1310ba6, 0x98dfb5ac, 0x2ffd72db, 0xd01adfb7, 0xb8e1afed, 0x6a267e96,
+	private static final int[] S_INITIAL = { 0xd1310ba6, 0x98dfb5ac, 0x2ffd72db, 0xd01adfb7, 0xb8e1afed, 0x6a267e96,
 			0xba7c9045, 0xf12c7f99, 0x24a19947, 0xb3916cf7, 0x0801f2e2, 0x858efc16, 0x636920d8, 0x71574e69, 0xa458fea3,
 			0xf4933d7e, 0x0d95748f, 0x728eb658, 0x718bcd58, 0x82154aee, 0x7b54a41d, 0xc25a59b5, 0x9c30d539, 0x2af26013,
 			0xc5d1b023, 0x286085f0, 0xca417918, 0xb8db38ef, 0x8e79dcb0, 0x603a180e, 0x6c9e0e8b, 0xb01e8a3e, 0xd71577c1,
@@ -130,29 +134,55 @@ public class BCryptPBKDF {
 	private static final int[] INITIAL_VECTOR = new int[] { 0x4f787963, 0x68726f6d, 0x61746963, 0x426c6f77, 0x66697368,
 			0x53776174, 0x44796e61, 0x6d697465, };
 
-	private int p[];
-	private int s[];
+	/** Maximum derived key length supported by bcrypt_pbkdf (32 output blocks of 32 bytes each). */
+	public static final int MAX_OUTPUT_LENGTH = 32 * 32;
+
+	/** Maximum salt length accepted by OpenSSH's bcrypt_pbkdf. */
+	public static final int MAX_SALT_LENGTH = 1 << 20;
+
+	private int[] p;
+	private int[] s;
 
 	/**
-	 * Derive a byte array from a password (Password-Based Key Derivation Function) for use in other ciphers
+	 * Creates a new bcrypt_pbkdf key derivation instance.
+	 */
+	public BCryptPBKDF() {
+		// Blowfish state is initialized on each hash calculation
+	}
+
+	/**
+	 * Derives key material from a password (Password-Based Key Derivation Function) for use in other ciphers.
+	 * The parameter limits are the same as in OpenSSH's bcrypt_pbkdf.
 	 *
-	 * @param password the password bytes used as key derivation input
-	 * @param salt the salt used during key derivation
-	 * @param rounds the number of key derivation rounds
-	 * @param output the byte array receiving the derived key
-	 * @throws Exception if the required cryptographic algorithm is unavailable
+	 * @param password the password bytes used as key derivation input (must not be empty)
+	 * @param salt the salt used during key derivation (1 - {@value #MAX_SALT_LENGTH} bytes)
+	 * @param rounds the number of key derivation rounds (at least 1)
+	 * @param output the byte array receiving the derived key (1 - {@value #MAX_OUTPUT_LENGTH} bytes), which is completely filled
+	 * @throws Exception if a parameter is invalid or the required hash algorithm SHA-512 is unavailable
 	 */
 	public void derivePassword(final byte[] password, final byte[] salt, final int rounds, final byte[] output) throws Exception {
+		if (password == null || password.length == 0) {
+			throw new IllegalArgumentException("Invalid empty password for bcrypt_pbkdf");
+		} else if (salt == null || salt.length == 0 || salt.length > MAX_SALT_LENGTH) {
+			throw new IllegalArgumentException("Invalid salt length for bcrypt_pbkdf: " + (salt == null ? 0 : salt.length));
+		} else if (rounds < 1) {
+			throw new IllegalArgumentException("Invalid rounds for bcrypt_pbkdf: " + rounds);
+		} else if (output == null || output.length == 0 || output.length > MAX_OUTPUT_LENGTH) {
+			throw new IllegalArgumentException("Invalid output length for bcrypt_pbkdf: " + (output == null ? 0 : output.length));
+		}
+
+		final byte[] passwordHashBytes = new byte[64];
+		final byte[] hsalt = new byte[64];
+		final byte[] out = new byte[32];
+		final byte[] tmp = new byte[32];
 		try {
 			final MessageDigest sha512 = MessageDigest.getInstance("SHA-512");
 
 			final int nblocks = (output.length + 31) / 32;
-			final byte[] passwordHashBytes = sha512.digest(password);
+			sha512.update(password);
+			sha512.digest(passwordHashBytes, 0, passwordHashBytes.length);
 
-			final byte[] hsalt = new byte[64];
 			final byte[] block_b = new byte[4];
-			final byte[] out = new byte[32];
-			final byte[] tmp = new byte[32];
 
 			for (int block = 1; block <= nblocks; block++) {
 				block_b[0] = (byte) ((block >> 24) & 0xFF);
@@ -189,6 +219,18 @@ public class BCryptPBKDF {
 			}
 		} catch (final Exception e) {
 			throw new Exception("Cannot derive byte array from password", e);
+		} finally {
+			// Remove sensitive intermediate data from memory
+			Arrays.fill(passwordHashBytes, (byte) 0);
+			Arrays.fill(hsalt, (byte) 0);
+			Arrays.fill(out, (byte) 0);
+			Arrays.fill(tmp, (byte) 0);
+			if (p != null) {
+				Arrays.fill(p, 0);
+			}
+			if (s != null) {
+				Arrays.fill(s, 0);
+			}
 		}
 	}
 

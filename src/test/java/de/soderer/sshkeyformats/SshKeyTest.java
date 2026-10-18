@@ -125,6 +125,7 @@ public class SshKeyTest {
 		testKeyPair(keyPair);
 	}
 
+	@SuppressWarnings("deprecation")
 	@Test
 	public void testDsa() throws Exception {
 		final KeyPair keyPair = KeyPairUtilities.createDsaKeyPair(1024);
@@ -306,6 +307,7 @@ public class SshKeyTest {
 		assertTrue(CryptographicUtilities.checkPrivateKeyFitsPublicKey(readSshKey.getKeyPair().getPrivate(), readSshKey.getKeyPair().getPublic()));
 	}
 
+	@SuppressWarnings("deprecation")
 	@Test
 	public void test_Dsa_PuttyVersion2() throws Exception {
 		final KeyPair keyPair = KeyPairUtilities.createDsaKeyPair();
@@ -509,6 +511,7 @@ public class SshKeyTest {
 		assertTrue(CryptographicUtilities.checkPrivateKeyFitsPublicKey(readSshKey.getKeyPair().getPrivate(), readSshKey.getKeyPair().getPublic()));
 	}
 
+	@SuppressWarnings("deprecation")
 	@Test
 	public void test_Dsa_PuttyVersion3() throws Exception {
 		final KeyPair keyPair = KeyPairUtilities.createDsaKeyPair();
@@ -669,6 +672,7 @@ public class SshKeyTest {
 		assertTrue(CryptographicUtilities.checkPrivateKeyFitsPublicKey(readSshKey.getKeyPair().getPrivate(), readSshKey.getKeyPair().getPublic()));
 	}
 
+	@SuppressWarnings("deprecation")
 	@Test
 	public void test_Dsa_OpenSshv1() throws Exception {
 		final KeyPair keyPair = KeyPairUtilities.createDsaKeyPair();

@@ -67,24 +67,28 @@ import de.soderer.sshkeyformats.data.Password;
 import de.soderer.sshkeyformats.data.WrongPasswordException;
 
 /**
- * Reader for SSH public and private keys with optional password protection<br />
- * <br />
- * Supported key formats:<br />
- * - OpenSSHv1 (proprietary format of OpenSSH, "-----BEGIN OPENSSH PRIVATE KEY-----")<br />
- * - OpenSSL traditional ("-----BEGIN RSA/DSA/EC PRIVATE KEY-----", optionally encrypted by "Proc-Type: 4,ENCRYPTED")<br />
- * - PKCS#8 ("-----BEGIN PRIVATE KEY-----" and "-----BEGIN ENCRYPTED PRIVATE KEY-----" with PBES2/PBKDF2)<br />
- * - X.509 SubjectPublicKeyInfo ("-----BEGIN PUBLIC KEY-----") and PKCS#1 ("-----BEGIN RSA PUBLIC KEY-----")<br />
- * - PuTTY key version 2 ("PuTTY-User-Key-File-2: ...")<br />
- * - PuTTY key version 3 ("PuTTY-User-Key-File-3: ...")<br />
- * - RFC 4716 ("---- BEGIN SSH2 PUBLIC KEY ----")<br />
- * - OpenSSH public keys and authorized_keys lines<br />
- * <br />
- * Supported cipher algorithms:<br />
- * - RSA<br />
- * - DSA<br />
- * - EC / ECDSA (nistp256, nistp384, nistp521)<br />
- * - EdDSA (Ed25519, Ed448)<br />
- * <br />
+ * Reader for SSH public and private keys with optional password protection.
+ * <p>
+ * Supported key formats:
+ * <ul>
+ * <li>OpenSSH v1 (proprietary format of OpenSSH, "-----BEGIN OPENSSH PRIVATE KEY-----")</li>
+ * <li>OpenSSL traditional ("-----BEGIN RSA/DSA/EC PRIVATE KEY-----", optionally encrypted by "Proc-Type: 4,ENCRYPTED"),
+ * preceding "-----BEGIN EC PARAMETERS-----" blocks are skipped</li>
+ * <li>PKCS#8 ("-----BEGIN PRIVATE KEY-----" and "-----BEGIN ENCRYPTED PRIVATE KEY-----" with PBES2/PBKDF2)</li>
+ * <li>X.509 SubjectPublicKeyInfo ("-----BEGIN PUBLIC KEY-----") and PKCS#1 ("-----BEGIN RSA PUBLIC KEY-----")</li>
+ * <li>PuTTY key version 2 ("PuTTY-User-Key-File-2: ...")</li>
+ * <li>PuTTY key version 3 ("PuTTY-User-Key-File-3: ...")</li>
+ * <li>RFC 4716 public keys ("---- BEGIN SSH2 PUBLIC KEY ----")</li>
+ * <li>OpenSSH public keys and authorized_keys lines</li>
+ * </ul>
+ * <p>
+ * Supported key algorithms:
+ * <ul>
+ * <li>RSA</li>
+ * <li>DSA</li>
+ * <li>EC / ECDSA (nistp256, nistp384, nistp521)</li>
+ * <li>EdDSA (Ed25519, Ed448)</li>
+ * </ul>
  */
 public class SshKeyReader {
 	/** Maximum encoded key data accepted in a PEM/RFC4716 block. */
@@ -141,6 +145,10 @@ public class SshKeyReader {
 	private static final OID OID_AES192_CBC = oid("2.16.840.1.101.3.4.1.22");
 	private static final OID OID_AES256_CBC = oid("2.16.840.1.101.3.4.1.42");
 	private static final OID OID_DES_EDE3_CBC = oid("1.2.840.113549.3.7");
+
+	private SshKeyReader() {
+		// Utility class, no instances
+	}
 
 	private static OID oid(final String oidString) {
 		try {
@@ -214,7 +222,8 @@ public class SshKeyReader {
 					if (nextLine.toLowerCase().contains("public")) {
 						sshKey = new SshKey(SshKeyFormat.OpenSSL, ssh2Block.getHeader("Comment"), new KeyPair(parsePublicKeyBytes(ssh2Block.getData()), null));
 					} else if (nextLine.toLowerCase().contains("private")) {
-						sshKey = readTraditionalPrivateKey("RSA", ssh2Block, password, publicKeyOnly, SshKeyFormat.OpenSSL);
+						// "---- BEGIN SSH2 (ENCRYPTED) PRIVATE KEY ----" is the proprietary SSH.com (Tectia) format, which is no DER structure
+						throw new Exception("Unsupported SSH.com private key format: " + nextLine);
 					} else {
 						throw new Exception("Unknown key identifier found: " + nextLine);
 					}
@@ -239,7 +248,7 @@ public class SshKeyReader {
 				if (sshKey != null) {
 					return sshKey;
 				}
-				// Key was skipped (encrypted private key without public key data in public key only mode), continue with the next one
+				// Block was skipped (EC parameters or encrypted private key without public key data in public key only mode), continue with the next one
 			}
 		}
 	}
@@ -288,6 +297,9 @@ public class SshKeyReader {
 				} else {
 					return new SshKey(SshKeyFormat.OpenSSL, null, decryptPkcs8PrivateKey(pemBlock.getData(), password));
 				}
+			case "EC PARAMETERS":
+				// Written by "openssl ecparam -genkey" before the "EC PRIVATE KEY" block, the curve is also contained in the key itself
+				return null;
 			case "PUBLIC KEY":
 				return new SshKey(SshKeyFormat.OpenSSL, null, new KeyPair(parseX509PublicKey(pemBlock.getData()), null));
 			case "RSA PUBLIC KEY":
@@ -546,8 +558,12 @@ public class SshKeyReader {
 			try {
 				final Cipher cipher = Cipher.getInstance(cipherName);
 				cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, keyAlgorithm), new IvParameterSpec(iv));
-				final byte[] privateKeyInfo = removePkcs7Padding(cipher.doFinal(encryptedData), blockSize);
-				return parsePkcs8PrivateKey(privateKeyInfo);
+				final byte[] decryptedData = cipher.doFinal(encryptedData);
+				try {
+					return parsePkcs8PrivateKey(removePkcs7Padding(decryptedData, blockSize));
+				} finally {
+					Arrays.fill(decryptedData, (byte) 0);
+				}
 			} catch (final Exception e) {
 				lastException = e;
 			} finally {
@@ -980,7 +996,12 @@ public class SshKeyReader {
 			throw new Exception("Invalid key derivation function '" + kdfName + "' for unencrypted key");
 		}
 
-		final SshKey sshKey = readOpenSshv1PrivateKey(privateKeyDataBytes);
+		final SshKey sshKey;
+		try {
+			sshKey = readOpenSshv1PrivateKey(privateKeyDataBytes);
+		} finally {
+			Arrays.fill(privateKeyDataBytes, (byte) 0);
+		}
 		if (!Arrays.equals(publicKey.getEncoded(), sshKey.getKeyPair().getPublic().getEncoded())) {
 			throw new Exception("Invalid key data: public key and public key data of the private key section do not match");
 		}
@@ -1180,6 +1201,14 @@ public class SshKeyReader {
 		return KeyFactory.getInstance("EC").generatePublic(new ECPublicKeySpec(point, ecSpec));
 	}
 
+	/**
+	 * Creates an EC private key on the given NIST curve using the JDK EC implementation.
+	 *
+	 * @param s the private value, which must be in the interval [1, n - 1]
+	 * @param nistCurveName "nistp256", "nistp384" or "nistp521"
+	 * @return the EC private key
+	 * @throws Exception if the curve is unsupported or the private value is invalid
+	 */
 	static PrivateKey createEcPrivateKey(final BigInteger s, final String nistCurveName) throws Exception {
 		final ECParameterSpec ecSpec = getJdkEcCurveSpec(nistCurveName);
 		if (s.signum() <= 0 || s.compareTo(ecSpec.getOrder()) >= 0) {
@@ -1210,6 +1239,14 @@ public class SshKeyReader {
 		return KeyFactory.getInstance(curveName).generatePublic(new EdECPublicKeySpec(new NamedParameterSpec(curveName), edECPoint));
 	}
 
+	/**
+	 * Creates an EdDSA private key from its raw seed (RFC 8032).
+	 *
+	 * @param seed the 32 byte (Ed25519) or 57 byte (Ed448) private key seed
+	 * @param curveName "Ed25519" or "Ed448"
+	 * @return the EdDSA private key
+	 * @throws Exception if the seed length is invalid or the key cannot be created
+	 */
 	static PrivateKey createEdDsaPrivateKey(final byte[] seed, final String curveName) throws Exception {
 		final int expectedLength = "Ed25519".equals(curveName) ? 32 : 57;
 		if (seed == null || seed.length != expectedLength) {
@@ -1363,6 +1400,13 @@ public class SshKeyReader {
 		return value;
 	}
 
+	/**
+	 * Derives the 32 byte AES key of PuTTY v2 keys: SHA-1(0x00000000 | password) | SHA-1(0x00000001 | password), truncated.
+	 *
+	 * @param passwordByteArray the encoded password
+	 * @return the 32 byte AES-256 key, which should be cleared by the caller after use
+	 * @throws Exception if SHA-1 is unavailable
+	 */
 	static byte[] getPuttyPrivateKeyEncryptionKeyVersion2(final byte[] passwordByteArray) throws Exception {
 		final byte[] puttyKeyEncryptionKey = new byte[32];
 		final MessageDigest digest = MessageDigest.getInstance("SHA-1");
@@ -1382,6 +1426,13 @@ public class SshKeyReader {
 		return puttyKeyEncryptionKey;
 	}
 
+	/**
+	 * Derives the HMAC-SHA-1 key of PuTTY v2 keys: SHA-1("putty-private-key-file-mac-key" | password).
+	 *
+	 * @param passwordBytes the encoded password, or {@code null} for unencrypted keys
+	 * @return the 20 byte MAC key
+	 * @throws Exception if SHA-1 is unavailable
+	 */
 	static byte[] getPuttyMacKeyVersion2(final byte[] passwordBytes) throws Exception {
 		final MessageDigest digest = MessageDigest.getInstance("SHA-1");
 		digest.update("putty-private-key-file-mac-key".getBytes(StandardCharsets.US_ASCII));
@@ -1412,6 +1463,18 @@ public class SshKeyReader {
 		return deriveArgon2Key(passwordBytes, argon2Type, argon2Memory, argon2Passes, argon2Parallelism, argon2Salt);
 	}
 
+	/**
+	 * Derives the 80 bytes of key material of PuTTY v3 keys (32 bytes AES key, 16 bytes IV, 32 bytes MAC key) with Argon2.
+	 *
+	 * @param passwordBytes the encoded password
+	 * @param argon2Type "Argon2i", "Argon2d" or "Argon2id"
+	 * @param argon2Memory the memory in KiB
+	 * @param argon2Passes the number of passes
+	 * @param argon2Parallelism the degree of parallelism
+	 * @param argon2Salt the salt
+	 * @return the 80 bytes of derived key material, which should be cleared by the caller after use
+	 * @throws Exception if the Argon2 type is unsupported
+	 */
 	static byte[] deriveArgon2Key(final byte[] passwordBytes, final String argon2Type, final int argon2Memory, final int argon2Passes, final int argon2Parallelism, final byte[] argon2Salt) throws Exception {
 		final int argon2TypeInt;
 		if ("Argon2i".equalsIgnoreCase(argon2Type)) {
@@ -1565,6 +1628,13 @@ public class SshKeyReader {
 		}
 	}
 
+	/**
+	 * Strictly decodes a hexadecimal string without prefix or separators.
+	 *
+	 * @param value the hexadecimal string with an even number of digits
+	 * @return the decoded bytes
+	 * @throws Exception if the value is {@code null}, has an odd length or contains non hexadecimal characters
+	 */
 	static byte[] fromHexString(final String value) throws Exception {
 		if (value == null || value.length() % 2 != 0) {
 			throw new Exception("Invalid hex string");
@@ -1581,6 +1651,12 @@ public class SshKeyReader {
 		return data;
 	}
 
+	/**
+	 * Encodes bytes as uppercase hexadecimal string.
+	 *
+	 * @param data the bytes to encode
+	 * @return the uppercase hexadecimal string
+	 */
 	static String toHexString(final byte[] data) {
 		final StringBuilder returnString = new StringBuilder();
 		for (final byte dataByte : data) {

@@ -299,6 +299,7 @@ public class SshKeyRegressionTest {
 		}
 	}
 
+	@SuppressWarnings("deprecation")
 	@Test
 	public void testKeyStrength() throws Exception {
 		assertEquals(256, new SshKey(null, null, KeyPairUtilities.createEd25519CurveKeyPair()).getKeyStrength());
@@ -387,7 +388,7 @@ public class SshKeyRegressionTest {
 	@Test
 	public void testMismatchingKeyTypesAreRejected() throws Exception {
 		final KeyPair edKeyPair = KeyPairUtilities.createEd25519CurveKeyPair();
-		final KeyPair rsaKeyPair = KeyPairUtilities.createRsaKeyPair(1024);
+		final KeyPair rsaKeyPair = KeyPairUtilities.createRsaKeyPair(2048);
 		assertThrows(IllegalArgumentException.class, () -> new SshKey(null, null, new KeyPair(edKeyPair.getPublic(), rsaKeyPair.getPrivate())));
 	}
 
