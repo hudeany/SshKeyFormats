@@ -8,11 +8,24 @@ import java.util.regex.Pattern;
 
 /**
  * Helper methods for bit, byte and hexadecimal conversions as well as XOR and padding operations on byte arrays.
+ * <p>
+ * Hexadecimal input is only accepted with the ASCII digits 0-9, a-f and A-F. Other Unicode digits (like fullwidth
+ * or Arabic-Indic digits) are rejected.
+ * </p>
  */
 public class BitUtilities {
 	private static final Pattern BITSTRINGPATTERN_BYTE = Pattern.compile("^[10]{1,8}$");
 	private static final Pattern BITSTRINGPATTERN_INTEGER = Pattern.compile("^[10]{1,32}$");
 	private static final char[] HEX_CHARS_UPPERCASE = "0123456789ABCDEF".toCharArray();
+
+	/** Prefix "0x" not directly following a hex digit, so a separator like 'x' in "10x20" is not taken as prefix. */
+	private static final Pattern HEX_PREFIX_PATTERN = Pattern.compile("(?<![0-9a-fA-F])0[xX]");
+
+	/** All characters which are no ASCII hex digits. */
+	private static final Pattern NON_HEX_CHARACTER_PATTERN = Pattern.compile("[^0-9a-fA-F]");
+
+	/** Shared random source, SecureRandom is thread safe and creating new instances is expensive. */
+	private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
 	private BitUtilities() {
 		// Utility class, no instances
@@ -47,11 +60,11 @@ public class BitUtilities {
 	 *
 	 * @param value the unsigned value in the range 0 to 255
 	 * @return the corresponding Java byte value
-	 * @throws Exception if the value is outside the range 0 to 255
+	 * @throws IllegalArgumentException if the value is outside the range 0 to 255
 	 */
-	public static byte getUnsignedAsByte(final int value) throws Exception {
+	public static byte getUnsignedAsByte(final int value) {
 		if (value < 0 || value > 255) {
-			throw new Exception("Unsigned value out of range for byte");
+			throw new IllegalArgumentException("Unsigned value out of range for byte: " + value);
 		} else {
 			return (byte) value;
 		}
@@ -148,7 +161,7 @@ public class BitUtilities {
 	/**
 	 * Decodes a hexadecimal string (case insensitive, optional prefix "0x") into a byte array.
 	 *
-	 * @param value the hexadecimal string with an even number of hex digits
+	 * @param value the hexadecimal string with an even number of ASCII hex digits
 	 * @return the decoded bytes, or {@code null} if {@code value} is {@code null}
 	 * @throws IllegalArgumentException if the string contains non hexadecimal characters or has an odd number of digits
 	 */
@@ -165,8 +178,8 @@ public class BitUtilities {
 			}
 			final byte[] data = new byte[decodeValue.length() / 2];
 			for (int i = 0; i < decodeValue.length(); i += 2) {
-				final int high = Character.digit(decodeValue.charAt(i), 16);
-				final int low = Character.digit(decodeValue.charAt(i + 1), 16);
+				final int high = hexDigitValue(decodeValue.charAt(i));
+				final int low = hexDigitValue(decodeValue.charAt(i + 1));
 				if (high < 0 || low < 0) {
 					throw new IllegalArgumentException("String contains non hexadecimal character: " + value);
 				}
@@ -178,10 +191,15 @@ public class BitUtilities {
 
 	/**
 	 * Decodes a hexadecimal string into a byte array, optionally ignoring all non hexadecimal characters
-	 * (like separators, blanks or linebreaks, e.g. "0A:1B:2C").
+	 * (like separators, blanks or linebreaks, e.g. "0A:1B:2C" or "0x0A, 0x1B, 0x2C").
+	 * <p>
+	 * Each byte must be written with two hex digits, because single digit bytes cannot be told apart after the
+	 * separators are removed: "1:2" is decoded as the single byte 0x12, not as the two bytes 0x01 and 0x02.
+	 * </p>
 	 *
 	 * @param value the hexadecimal string
-	 * @param ignoreNonHexCharacters {@code true} to remove all non hexadecimal characters (and an optional prefix "0x") before decoding
+	 * @param ignoreNonHexCharacters {@code true} to remove all "0x" prefixes and all non hexadecimal characters before
+	 *            decoding
 	 * @return the decoded bytes, or {@code null} if {@code value} is {@code null}
 	 * @throws IllegalArgumentException if the remaining string contains non hexadecimal characters or has an odd number of digits
 	 */
@@ -189,12 +207,9 @@ public class BitUtilities {
 		if (value == null) {
 			return null;
 		} else if (ignoreNonHexCharacters) {
-			String decodeValue = value.trim();
-			if (decodeValue.startsWith("0x") || decodeValue.startsWith("0X")) {
-				// Remove the prefix first, otherwise its "0" would remain as hex digit
-				decodeValue = decodeValue.substring(2);
-			}
-			return fromHexString(decodeValue.replaceAll("[^0-9a-fA-F]", ""));
+			// Remove the prefixes first, otherwise their "0" would remain as hex digit
+			final String withoutPrefixes = HEX_PREFIX_PATTERN.matcher(value).replaceAll("");
+			return fromHexString(NON_HEX_CHARACTER_PATTERN.matcher(withoutPrefixes).replaceAll(""));
 		} else {
 			return fromHexString(value);
 		}
@@ -246,13 +261,20 @@ public class BitUtilities {
 	 * Returns a hex dump of the given data (uppercase hex digits).
 	 *
 	 * @param data the bytes to dump
-	 * @param separator the separator inserted between bytes within one line
+	 * @param separator the separator inserted between bytes within one line, or {@code null} for no separator
 	 * @param bytesBeforeLinebreak number of bytes per line, or 0 (or less) for a single line
 	 * @param insertHexLineNumber {@code true} to prefix each line with its hexadecimal byte offset (e.g. "00000010h: ")
 	 * @param insertAsciiText {@code true} to append the printable ASCII representation of each line (non printable bytes are shown as '.')
-	 * @return the hex dump
+	 * @return the hex dump, an empty string for empty data, or {@code null} if {@code data} is {@code null}
 	 */
 	public static String getHexString(final byte[] data, final String separator, final int bytesBeforeLinebreak, final boolean insertHexLineNumber, final boolean insertAsciiText) {
+		if (data == null) {
+			return null;
+		} else if (data.length == 0) {
+			// No line number without any line content
+			return "";
+		}
+
 		final StringBuilder returnString = new StringBuilder();
 		int byteCount = 0;
 		StringBuilder asciiTextLine = new StringBuilder();
@@ -302,9 +324,10 @@ public class BitUtilities {
 	}
 
 	/**
-	 * Decodes a hexadecimal string (without prefix or separators) into a byte array.
+	 * Decodes a hexadecimal string (case insensitive, optional prefix "0x", no separators) into a byte array.
+	 * Unlike {@link #fromHexString(String)} a {@code null} value is rejected.
 	 *
-	 * @param value the hexadecimal string with an even number of hex digits
+	 * @param value the hexadecimal string with an even number of ASCII hex digits
 	 * @return the decoded bytes
 	 * @throws IllegalArgumentException if the value is {@code null}, contains non hexadecimal characters or has an odd number of digits
 	 */
@@ -320,7 +343,7 @@ public class BitUtilities {
 	 *
 	 * @param byteArrays the byte arrays to combine, all of the same length
 	 * @return the XOR result
-	 * @throws IllegalArgumentException if no arrays are given or the arrays differ in length
+	 * @throws IllegalArgumentException if no arrays are given, an array is {@code null} or the arrays differ in length
 	 */
 	public static byte[] xor(final byte[]... byteArrays) {
 		if (byteArrays == null) {
@@ -334,15 +357,21 @@ public class BitUtilities {
 	 *
 	 * @param byteArrays the byte arrays to combine, all of the same length
 	 * @return the XOR result
-	 * @throws IllegalArgumentException if no arrays are given or the arrays differ in length
+	 * @throws IllegalArgumentException if no arrays are given, an array is {@code null} or the arrays differ in length
 	 */
 	public static byte[] xor(final List<byte[]> byteArrays) {
-		if (byteArrays == null || byteArrays.isEmpty() || byteArrays.get(0) == null) {
+		if (byteArrays == null || byteArrays.isEmpty()) {
 			throw new IllegalArgumentException("Missing byte arrays for xor");
 		}
+		for (final byte[] byteArray : byteArrays) {
+			if (byteArray == null) {
+				throw new IllegalArgumentException("Byte arrays for xor contain a null array");
+			}
+		}
+
 		final byte[] returnArray = new byte[byteArrays.get(0).length];
 		for (final byte[] byteArray : byteArrays) {
-			if (byteArray == null || byteArray.length != returnArray.length) {
+			if (byteArray.length != returnArray.length) {
 				throw new IllegalArgumentException("Byte arrays for xor must have the same length");
 			}
 			for (int j = 0; j < returnArray.length; j++) {
@@ -354,9 +383,13 @@ public class BitUtilities {
 
 	/**
 	 * XORs all given bytes.
+	 * <p>
+	 * A call without arguments ({@code xor()}) or with {@code null} is ambiguous with {@link #xor(byte[]...)} and does
+	 * not compile. To XOR no bytes, pass an empty array: {@code xor(new byte[0])}.
+	 * </p>
 	 *
 	 * @param keyData the bytes to combine
-	 * @return the XOR of all bytes, 0 if no bytes are given
+	 * @return the XOR of all bytes, 0 for an empty array
 	 */
 	public static byte xor(final byte... keyData) {
 		byte resultItem = 0;
@@ -371,22 +404,26 @@ public class BitUtilities {
 	 *
 	 * @param arrays the byte arrays to join
 	 * @return a new array containing all bytes
-	 * @throws Exception if one of the arrays is {@code null}
+	 * @throws IllegalArgumentException if the arrays or one of the arrays is {@code null}
 	 */
-	public static byte[] joinByteArrays(final byte[]... arrays) throws Exception {
+	public static byte[] joinByteArrays(final byte[]... arrays) {
+		if (arrays == null) {
+			throw new IllegalArgumentException("Invalid null arrays for join");
+		}
 		final ByteArrayOutputStream out = new ByteArrayOutputStream();
 		for (final byte[] array : arrays) {
 			if (array == null) {
-				throw new Exception("Invalid null array for join");
+				throw new IllegalArgumentException("Invalid null array for join");
 			}
-			out.write(array);
+			out.writeBytes(array);
 		}
 		return out.toByteArray();
 	}
 
 	/**
-	 * Adds length-coded padding (PKCS#5/#7) that can be removed after decryption.
-	 * Data, whose length is already a multiple of the padding size, gets a full block of padding.
+	 * Adds length-coded padding (PKCS#5/#7) that can be removed after decryption by
+	 * {@link #removeLengthCodedPadding(byte[], int)}. Data, whose length is already a multiple of the padding size, gets
+	 * a full block of padding.
 	 *
 	 * @param data the data to pad
 	 * @param paddingSize the padding block size (1 - 255)
@@ -404,6 +441,40 @@ public class BitUtilities {
 	}
 
 	/**
+	 * Removes length-coded padding (PKCS#5/#7) added by {@link #addLengthCodedPadding(byte[], int)}.
+	 * <p>
+	 * All padding bytes are checked without early exit, so the check takes the same time wherever the padding is
+	 * broken. Note that distinguishable error messages after decryption can still allow a padding oracle attack, so
+	 * callers decrypting untrusted data should report all decryption errors the same way.
+	 * </p>
+	 *
+	 * @param data the padded data, its length must be a positive multiple of the padding size
+	 * @param paddingSize the padding block size (1 - 255)
+	 * @return the data without padding
+	 * @throws IllegalArgumentException if the padding size is not in the range 1 - 255, the data length is invalid or
+	 *             the padding is invalid
+	 */
+	public static byte[] removeLengthCodedPadding(final byte[] data, final int paddingSize) {
+		if (paddingSize < 1 || paddingSize > 255) {
+			throw new IllegalArgumentException("Invalid padding size: " + paddingSize);
+		} else if (data == null || data.length == 0 || data.length % paddingSize != 0) {
+			throw new IllegalArgumentException("Invalid padded data length");
+		}
+
+		final int padLength = data[data.length - 1] & 0xFF;
+		boolean invalid = padLength < 1 || padLength > paddingSize;
+		// Check the maximum possible padding area completely, so the duration does not depend on the padding content
+		for (int i = 1; i <= paddingSize; i++) {
+			final boolean isPaddingByte = i <= padLength;
+			invalid |= isPaddingByte & (data[data.length - i] & 0xFF) != padLength;
+		}
+		if (invalid) {
+			throw new IllegalArgumentException("Invalid padding");
+		}
+		return Arrays.copyOf(data, data.length - padLength);
+	}
+
+	/**
 	 * Adds random padding that cannot be removed without knowing the resulting length.
 	 *
 	 * @param data the data to pad
@@ -418,7 +489,7 @@ public class BitUtilities {
 		if (data.length % paddingSize != 0) {
 			final byte[] dataPadded = Arrays.copyOf(data, ((data.length / paddingSize) + 1) * paddingSize);
 			final byte[] randomPadding = new byte[dataPadded.length - data.length];
-			new SecureRandom().nextBytes(randomPadding);
+			SECURE_RANDOM.nextBytes(randomPadding);
 			System.arraycopy(randomPadding, 0, dataPadded, data.length, randomPadding.length);
 			return dataPadded;
 		} else {
@@ -427,9 +498,9 @@ public class BitUtilities {
 	}
 
 	/**
-	 * Decodes the first two hexadecimal characters of a string into a byte.
+	 * Decodes the first two hexadecimal characters of a string into a byte. Further characters are ignored.
 	 *
-	 * @param data the string starting with two hexadecimal digits
+	 * @param data the string starting with two ASCII hexadecimal digits
 	 * @return the decoded byte
 	 * @throws IllegalArgumentException if the string is shorter than two characters or contains non hexadecimal characters
 	 */
@@ -443,14 +514,14 @@ public class BitUtilities {
 	/**
 	 * Decodes two hexadecimal characters into a byte.
 	 *
-	 * @param char1 the high nibble hex digit
-	 * @param char2 the low nibble hex digit
+	 * @param char1 the high nibble ASCII hex digit
+	 * @param char2 the low nibble ASCII hex digit
 	 * @return the decoded byte
-	 * @throws IllegalArgumentException if one of the characters is not a hexadecimal digit
+	 * @throws IllegalArgumentException if one of the characters is not an ASCII hexadecimal digit
 	 */
 	public static byte hexToByte(final char char1, final char char2) {
-		final int high = Character.digit(char1, 16);
-		final int low = Character.digit(char2, 16);
+		final int high = hexDigitValue(char1);
+		final int low = hexDigitValue(char2);
 		if (high < 0 || low < 0) {
 			throw new IllegalArgumentException("Invalid hexadecimal byte: " + char1 + char2);
 		}
@@ -465,6 +536,25 @@ public class BitUtilities {
 	 */
 	public static String byteToHex(final byte data) {
 		return new String(new char[] { HEX_CHARS_UPPERCASE[(data >>> 4) & 0x0F], HEX_CHARS_UPPERCASE[data & 0x0F] });
+	}
+
+	/**
+	 * Returns the value of an ASCII hexadecimal digit (0-9, a-f, A-F). Unlike {@link Character#digit(char, int)} this
+	 * does not accept non ASCII digits like fullwidth or Arabic-Indic digits.
+	 *
+	 * @param character the character to convert
+	 * @return the value 0 to 15, or -1 if the character is no ASCII hexadecimal digit
+	 */
+	private static int hexDigitValue(final char character) {
+		if (character >= '0' && character <= '9') {
+			return character - '0';
+		} else if (character >= 'a' && character <= 'f') {
+			return character - 'a' + 10;
+		} else if (character >= 'A' && character <= 'F') {
+			return character - 'A' + 10;
+		} else {
+			return -1;
+		}
 	}
 
 	private static String repeatString(final String itemString, final int repeatTimes) {
